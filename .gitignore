@@ -3,3 +3,18 @@
 
 # macOS metadata
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local runtime artifacts
+.local/
+uploads/
+outputs/
