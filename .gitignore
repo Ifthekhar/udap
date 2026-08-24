@@ -1,0 +1,5 @@
+# Microsoft Word temporary lock files
+~$*.docx
+
+# macOS metadata
+.DS_Store
