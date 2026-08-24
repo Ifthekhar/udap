@@ -38,13 +38,13 @@ The first version should prove the core transformation engine without trying to 
 
 ### MVP Outputs
 
-Priority order:
+Priority:
 
-1. Accessible HTML
-2. Accessible DOCX
-3. Accessible PDF
+1. Accessible PDF
+2. Accessibility validation report
+3. Accessible DOCX only if it helps support the PDF remediation workflow
 
-Accessible PDF is important, but technically harder. HTML should be the first output because structure, semantics, validation, and iteration are faster.
+Accessible PDF is the first product priority and the make-or-break MVP capability. If the platform cannot produce a meaningfully accessible PDF, then producing accessible HTML does not prove the core product. The implementation may use intermediate HTML or DOCX internally if that improves PDF reconstruction and validation, but HTML should not be treated as a substitute MVP deliverable.
 
 ### MVP Accessibility Standard
 
@@ -80,6 +80,7 @@ Start with issues that are common, valuable, and reasonably automatable:
 - Complex charts, maps, diagrams, and infographics without human review
 - Complex fillable PDF forms
 - Multimedia captions and transcripts
+- Standalone accessible HTML export before accessible PDF is proven
 
 ## 4. Key User Journey
 
@@ -247,9 +248,9 @@ The AI layer should not be the source of truth for standards. It should operate 
 
 Responsibilities:
 
-- Generate accessible HTML.
-- Generate accessible DOCX.
-- Generate accessible PDF when supported.
+- Generate tagged accessible PDF as the primary output.
+- Generate accessible DOCX only where it supports the remediation workflow or a later product requirement.
+- Generate intermediate HTML only as an internal representation when useful for reconstruction or validation.
 - Preserve meaningful content and structure.
 - Apply approved remediations.
 
@@ -309,13 +310,14 @@ Responsibilities:
 
 - DOCX: python-docx, Mammoth-style extraction, OOXML inspection where needed
 - PDF: PyMuPDF, pdfplumber, pypdf
-- HTML: semantic HTML generation
+- HTML: internal semantic representation only where useful
 - OCR later: OCRmyPDF, Tesseract, or a cloud OCR provider
 
 ### Accessibility Validation
 
-- HTML: axe-core, pa11y
 - PDF: veraPDF for PDF/UA checks
+- PDF structural checks for tags, reading order, language, metadata, links, images, headings, and tables
+- HTML: axe-core or pa11y only if an HTML export or intermediate validation path is added
 - Custom rules for document model validation
 
 ### AI
@@ -413,11 +415,13 @@ Important issue fields:
 - Build accept, edit, reject workflow.
 - Store audit trail.
 
-### Milestone 5: Accessible HTML Output
+### Milestone 5: Accessible PDF Output
 
-- Generate semantic HTML from internal model.
+- Generate tagged accessible PDF from the internal model or from a controlled accessible source format.
 - Apply accepted remediations.
-- Validate HTML with axe-core or pa11y.
+- Preserve headings, reading order, alt text, tables, links, language, and metadata.
+- Validate with PDF/UA tooling where possible.
+- Run structural checks for the selected WCAG rule subset.
 - Generate report.
 
 ### Milestone 6: DOCX Output
@@ -426,11 +430,12 @@ Important issue fields:
 - Preserve headings, lists, tables, alt text, language, and metadata.
 - Validate as much as possible with automated and structural checks.
 
-### Milestone 7: Accessible PDF Output
+### Milestone 7: PDF Hardening
 
-- Generate tagged PDF or convert from a known accessible source.
-- Validate with PDF/UA tooling where possible.
-- Clearly report what automated validation can and cannot prove.
+- Improve tagged PDF generation quality.
+- Add more PDF/UA-oriented structural checks.
+- Expand coverage for headings, lists, links, image alternatives, tables, and reading order.
+- Add regression fixtures for generated accessible PDFs.
 
 ## 11. Acceptance Criteria for MVP
 
@@ -454,7 +459,7 @@ Important issue fields:
 
 ### Accessible PDF Generation
 
-Generating truly accessible PDFs is hard. Plan to generate accessible HTML first, then DOCX, then PDF.
+Generating truly accessible PDFs is hard, but PDF is the product's first-priority output. Plan for extra engineering and validation effort around tags, reading order, metadata, language, headings, tables, links, and PDF/UA checks.
 
 ### Legal Compliance Claims
 
@@ -504,7 +509,7 @@ Start with a compact rule set that is useful and testable:
 - Tables have identifiable headers.
 - Lists are represented as lists.
 - Reading order can be derived with acceptable confidence.
-- Generated HTML has valid semantic structure.
+- Generated PDF has tags, language, title metadata, reading order, image alternatives, and table structure where applicable.
 
 ## 15. Naming
 
@@ -518,12 +523,12 @@ Potential shorter names can be explored later.
 
 ## 16. Immediate Next Decision
 
-Decide the first output target:
+First output target:
 
 Recommended:
 
 ```text
-DOCX/PDF input -> Accessible HTML output -> Validation report
+DOCX/PDF input -> Accessible PDF output -> Validation report
 ```
 
-This path proves the transformation engine fastest and avoids getting blocked early by the hardest part of the product: tagged accessible PDF generation.
+This path focuses the MVP on the highest-priority user outcome. HTML may be useful internally, but it should not be used to redefine success away from accessible PDF.

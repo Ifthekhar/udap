@@ -21,10 +21,10 @@ Use `PLAN.md` as the primary planning document.
 When implementation decisions are unclear, prefer the MVP direction in `PLAN.md`:
 
 ```text
-DOCX/PDF input -> Accessible HTML output -> Validation report
+DOCX/PDF input -> Accessible PDF output -> Validation report
 ```
 
-Accessible HTML should be treated as the first serious output target because it allows faster semantic reconstruction and automated validation. Accessible DOCX and accessible PDF should follow after the core transformation loop is working.
+Accessible PDF is the first-priority user-facing output and the make-or-break MVP capability. If the platform cannot produce a meaningfully accessible PDF, accessible HTML does not prove the product. The implementation may use intermediate HTML or DOCX internally if useful, but HTML must not be treated as a substitute MVP deliverable.
 
 ## MVP Boundaries
 
@@ -32,7 +32,7 @@ Prioritize:
 
 - DOCX input
 - Text-based PDF input
-- Accessible HTML output
+- Accessible PDF output
 - WCAG 2.2 A and AA checks
 - Human review for uncertain AI-generated fixes
 - Final validation report
@@ -45,6 +45,7 @@ Avoid expanding early into:
 - PowerPoint, Excel, EPUB, and complex publishing formats
 - Complex scanned documents
 - Complex fillable PDF forms
+- Standalone accessible HTML export before accessible PDF is proven
 - Legal compliance guarantees
 
 ## Product Principles
@@ -96,8 +97,9 @@ Unless the project later chooses something else, assume:
 - Production storage: S3-compatible object storage
 - DOCX processing: python-docx and OOXML inspection when needed
 - PDF processing: PyMuPDF, pdfplumber, pypdf
-- HTML validation: axe-core or pa11y
-- PDF validation: veraPDF when accessible PDF output is added
+- PDF validation: veraPDF for accessible PDF checks
+- PDF structural checks for tags, reading order, language, metadata, links, images, headings, and tables
+- HTML validation: axe-core or pa11y only if an HTML export or intermediate validation path is added
 
 ## Implementation Guidance
 
