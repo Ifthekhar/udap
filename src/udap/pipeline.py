@@ -6,7 +6,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
 
-from .models import AnalysisResult, AuditEvent, AuditEventType, DocumentModel
+from .models import AnalysisJob, AnalysisResult, AuditEvent, AuditEventType, DocumentModel
 from .rules import evaluate_document
 from .standards import WCAG_2_2_AA
 from .suggestions import generate_remediation_suggestions
@@ -68,3 +68,14 @@ def build_validation_report(result: AnalysisResult) -> dict[str, Any]:
         "suggestions": [asdict(suggestion) for suggestion in result.suggestions],
         "audit_events": [asdict(event) for event in result.audit_events],
     }
+
+
+def build_job_report(job: AnalysisJob) -> dict[str, Any]:
+    report = build_validation_report(job.result)
+    report["job"] = {
+        "id": job.id,
+        "status": job.status.value,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+    }
+    return report

@@ -71,6 +71,11 @@ class AuditEventType(StrEnum):
     USER_DECISION_RECORDED = "user_decision_recorded"
 
 
+class JobStatus(StrEnum):
+    AWAITING_REVIEW = "awaiting_review"
+    REVIEWED = "reviewed"
+
+
 @dataclass(frozen=True)
 class SourceLocation:
     """Where an extracted item came from in the source document."""
@@ -243,3 +248,12 @@ class AnalysisResult:
 
     def suggestion_count(self) -> int:
         return len(self.suggestions)
+
+
+@dataclass
+class AnalysisJob:
+    id: str
+    result: AnalysisResult
+    status: JobStatus
+    created_at: str
+    updated_at: str

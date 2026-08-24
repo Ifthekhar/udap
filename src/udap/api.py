@@ -2,31 +2,35 @@
 
 from __future__ import annotations
 
+import os
 from tempfile import NamedTemporaryFile
 from typing import Annotated
 
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from pydantic import BaseModel
+
 from .extractors import MissingExtractorDependencyError, UnsupportedDocumentError, load_document
-from .pipeline import analyse_document, build_validation_report
+from .job_store import JobNotFoundError, LocalJobStore
+from .models import ReviewDecision, UserDecision
+from .pipeline import analyse_document, build_job_report
+from .review import ReviewWorkflowError
+
+
+class ReviewDecisionPayload(BaseModel):
+    suggestion_id: str
+    issue_id: str
+    decision: ReviewDecision
+    final_value: str | None = None
+    reviewer_note: str | None = None
 
 
 def create_app():
-    from fastapi import FastAPI, File, HTTPException, UploadFile
-    from pydantic import BaseModel
-
-    from .models import ReviewDecision, UserDecision
-
-    class ReviewDecisionPayload(BaseModel):
-        suggestion_id: str
-        issue_id: str
-        decision: ReviewDecision
-        final_value: str | None = None
-        reviewer_note: str | None = None
-
     app = FastAPI(
         title="Universal Digital Accessibility Platform",
         version="0.1.0",
         description="PDF-first accessibility remediation API.",
     )
+    store = LocalJobStore(os.environ.get("UDAP_JOB_STORE_DIR", ".local/jobs"))
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -43,21 +47,27 @@ def create_app():
 
             try:
                 document = load_document(tmp.name)
+                document.original_filename = file.filename or document.original_filename
                 result = analyse_document(document)
+                job = store.create(result)
             except UnsupportedDocumentError as exc:
                 raise HTTPException(status_code=415, detail=str(exc)) from exc
             except MissingExtractorDependencyError as exc:
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        return build_validation_report(result)
+        return build_job_report(job)
 
-    @app.post("/reviews/apply")
-    async def apply_review_decisions(payload: list[ReviewDecisionPayload]) -> dict:
-        """Validate review payload shape for the future persisted workflow.
+    @app.get("/jobs/{job_id}")
+    async def get_job(job_id: str) -> dict:
+        try:
+            job = store.get(job_id)
+        except JobNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Job not found.") from exc
+        return build_job_report(job)
 
-        This endpoint intentionally does not persist yet. It proves the API
-        contract that the UI will use once analysis jobs are stored.
-        """
+    @app.post("/jobs/{job_id}/review")
+    async def apply_job_review_decisions(job_id: str, payload: list[ReviewDecisionPayload]) -> dict:
+        """Apply accept/edit/reject decisions to a persisted analysis job."""
 
         decisions = [
             UserDecision(
@@ -70,12 +80,26 @@ def create_app():
             for item in payload
         ]
 
-        # Persistence arrives with the job/database milestone. For now this
-        # endpoint validates decision payloads and reports their count.
         if not decisions:
-            return {"decision_count": 0, "status": "no_decisions"}
+            try:
+                return build_job_report(store.get(job_id))
+            except JobNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="Job not found.") from exc
 
-        return {"decision_count": len(decisions), "status": "accepted_for_future_job_store"}
+        try:
+            job = store.apply_decisions(job_id, decisions)
+        except JobNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Job not found.") from exc
+        except ReviewWorkflowError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        return build_job_report(job)
+
+    @app.post("/reviews/apply")
+    async def apply_review_decisions(payload: list[ReviewDecisionPayload]) -> dict:
+        """Compatibility endpoint for validating review payload shape."""
+
+        return {"decision_count": len(payload), "status": "use_job_review_endpoint"}
 
     return app
 

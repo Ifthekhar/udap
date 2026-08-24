@@ -12,13 +12,17 @@ The MVP success condition is producing a meaningfully accessible PDF plus a vali
 
 ## Current Implementation
 
-This repository currently contains the first backend foundation:
+This repository currently contains the PDF-first backend foundation:
 
 - Neutral document model
 - WCAG 2.2-oriented accessibility rule metadata
+- PDF inspection and extraction signals
 - Deterministic analysis engine for the first issue categories
-- FastAPI app skeleton
-- Standard-library tests for the core rule engine
+- Remediation suggestion generation
+- Accept/edit/reject review workflow
+- Local JSON job persistence
+- FastAPI endpoints for upload, analysis, job retrieval, and review
+- Tests for extraction, rules, suggestions, review, and persisted jobs
 
 ## Local Setup
 
@@ -33,6 +37,22 @@ Run the API:
 
 ```bash
 uvicorn udap.api:create_app --factory --reload
+```
+
+Useful endpoints:
+
+```text
+GET  /health
+POST /documents/analyse
+POST /documents/analyze
+GET  /jobs/{job_id}
+POST /jobs/{job_id}/review
+```
+
+By default, local analysis jobs are stored under `.local/jobs`. Override with:
+
+```bash
+export UDAP_JOB_STORE_DIR=/path/to/jobs
 ```
 
 ## Product Docs

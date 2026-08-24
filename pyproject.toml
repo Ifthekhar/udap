@@ -19,6 +19,7 @@ udap-analyse = "udap.cli:main"
 
 [project.optional-dependencies]
 dev = [
+  "httpx2>=0.28.0",
   "pytest>=8.3.0",
   "ruff>=0.6.0",
 ]
