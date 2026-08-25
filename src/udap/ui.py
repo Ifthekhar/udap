@@ -30,6 +30,13 @@ APP_HTML = """<!doctype html>
           <input id="document-file" name="file" type="file" accept=".pdf,.docx" required>
           <button type="submit">Analyse</button>
         </form>
+        <form id="load-form" class="stack load-form">
+          <label for="job-id">Existing job ID</label>
+          <div class="inline-form">
+            <input id="job-id" name="job_id" type="text" autocomplete="off">
+            <button type="submit">Load</button>
+          </div>
+        </form>
       </section>
 
       <section class="panel assessment-panel" aria-labelledby="assessment-title">
@@ -58,6 +65,7 @@ APP_HTML = """<!doctype html>
           <span class="step-index">4</span>
         </div>
         <button id="generate-output" type="button" disabled>Generate PDF And Report</button>
+        <div id="remediation-summary" class="remediation-summary"></div>
         <div id="outputs" class="output-list"></div>
       </section>
     </section>
@@ -234,6 +242,18 @@ h3 {
   gap: 10px;
 }
 
+.load-form {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 label {
   color: var(--muted);
   font-size: 13px;
@@ -241,6 +261,7 @@ label {
 }
 
 input[type="file"],
+input[type="text"],
 select,
 textarea {
   width: 100%;
@@ -253,6 +274,11 @@ textarea {
 input[type="file"] {
   min-height: 42px;
   padding: 8px;
+}
+
+input[type="text"] {
+  min-height: 40px;
+  padding: 0 10px;
 }
 
 select {
@@ -293,7 +319,8 @@ textarea {
 
 .issue-list,
 .suggestion-list,
-.output-list {
+.output-list,
+.remediation-summary {
   display: grid;
   gap: 10px;
 }
@@ -321,6 +348,11 @@ textarea {
   display: grid;
   gap: 8px;
   margin-top: 10px;
+}
+
+.output-list,
+.remediation-summary {
+  margin-top: 12px;
 }
 
 .tag.high,
@@ -379,6 +411,7 @@ const state = {
 };
 
 const uploadForm = document.querySelector("#upload-form");
+const loadForm = document.querySelector("#load-form");
 const reviewForm = document.querySelector("#review-form");
 const outputButton = document.querySelector("#generate-output");
 const reviewSubmit = document.querySelector("#review-submit");
@@ -388,6 +421,7 @@ const summary = document.querySelector("#summary");
 const issues = document.querySelector("#issues");
 const suggestions = document.querySelector("#suggestions");
 const outputs = document.querySelector("#outputs");
+const remediationSummary = document.querySelector("#remediation-summary");
 
 uploadForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -410,11 +444,26 @@ uploadForm.addEventListener("submit", async (event) => {
   }
 });
 
+loadForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const jobId = document.querySelector("#job-id").value.trim();
+  if (!jobId) return;
+
+  setMessage("Loading job...");
+  try {
+    const payload = await requestJson(`/jobs/${encodeURIComponent(jobId)}`);
+    setJob(payload);
+    setMessage("Job loaded.");
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+});
+
 reviewForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!state.job) return;
 
-  const decisions = state.job.suggestions.map((suggestion) => {
+  const decisions = visibleSuggestions().map((suggestion) => {
     const decision = document.querySelector(`[name="decision-${suggestion.id}"]`).value;
     const finalValue = document.querySelector(`[name="value-${suggestion.id}"]`).value.trim();
     return {
@@ -479,6 +528,7 @@ function render() {
   renderSummary();
   renderIssues();
   renderSuggestions();
+  renderRemediationSummary();
   renderOutputs();
 }
 
@@ -529,7 +579,8 @@ function renderIssues() {
 }
 
 function renderSuggestions() {
-  if (!state.job || state.job.suggestions.length === 0) {
+  const visible = visibleSuggestions();
+  if (!state.job || visible.length === 0) {
     suggestions.innerHTML = `<p class="empty">No suggestions awaiting review.</p>`;
     reviewSubmit.disabled = true;
     outputButton.disabled = !state.job;
@@ -538,22 +589,48 @@ function renderSuggestions() {
 
   reviewSubmit.disabled = false;
   outputButton.disabled = false;
-  suggestions.innerHTML = state.job.suggestions.map((suggestion) => `
-    <article class="item">
-      <h3>${escapeHtml(suggestion.action.replaceAll("_", " "))}</h3>
-      <p>${escapeHtml(suggestion.explanation)}</p>
-      <div class="item-controls">
-        <label for="decision-${suggestion.id}">Decision</label>
-        <select id="decision-${suggestion.id}" name="decision-${suggestion.id}">
-          <option value="accept">Accept</option>
-          <option value="edit">Edit</option>
-          <option value="reject">Reject</option>
-        </select>
-        <label for="value-${suggestion.id}">Final value</label>
-        <textarea id="value-${suggestion.id}" name="value-${suggestion.id}">${escapeHtml(suggestion.proposed_value || "")}</textarea>
-      </div>
-    </article>
-  `).join("");
+  suggestions.innerHTML = visible.map((suggestion) => {
+    const issue = issueById(suggestion.issue_id);
+    const issueType = issue ? issue.issue_type.replaceAll("_", " ") : "issue";
+    const severity = issue ? issue.severity : "review";
+    return `
+      <article class="item">
+        <div class="item-row">
+          <div>
+            <h3>${escapeHtml(suggestion.action.replaceAll("_", " "))}</h3>
+            <p>${escapeHtml(suggestion.explanation)}</p>
+          </div>
+          <span class="tag ${escapeHtml(severity)}">${escapeHtml(severity)}</span>
+        </div>
+        <span class="tag review">${escapeHtml(issueType)}</span>
+        <div class="item-controls">
+          <label for="decision-${suggestion.id}">Decision</label>
+          <select id="decision-${suggestion.id}" name="decision-${suggestion.id}">
+            <option value="accept">Accept</option>
+            <option value="edit">Edit</option>
+            <option value="reject">Reject</option>
+          </select>
+          <label for="value-${suggestion.id}">Final value</label>
+          <textarea id="value-${suggestion.id}" name="value-${suggestion.id}">${escapeHtml(suggestion.proposed_value || "")}</textarea>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderRemediationSummary() {
+  const data = findRemediationSummary();
+  if (!data) {
+    remediationSummary.innerHTML = "";
+    return;
+  }
+
+  remediationSummary.innerHTML = [
+    metric(data.fixed_issue_count, "Fixed"),
+    metric(data.remaining_issue_count, "Remaining"),
+    metric(data.manual_review_count, "Manual review"),
+    metric(data.rejected_issue_count, "Rejected"),
+  ].join("");
 }
 
 function renderOutputs() {
@@ -568,13 +645,45 @@ function renderOutputs() {
     <article class="item">
       <div class="item-row">
         <div>
-          <h3>${escapeHtml(artifact.filename)}</h3>
-          <p>${escapeHtml(artifact.type.replaceAll("_", " "))}</p>
+          <h3>${escapeHtml(artifactLabel(artifact))}</h3>
+          <p>${escapeHtml(artifact.filename)}</p>
         </div>
         <a href="/jobs/${state.job.job.id}/outputs/${artifact.id}">Download</a>
       </div>
     </article>
   `).join("");
+}
+
+function visibleSuggestions() {
+  if (!state.job) return [];
+  return state.job.suggestions.filter((suggestion) => {
+    const issue = issueById(suggestion.issue_id);
+    return !issue || issue.final_status === "open";
+  });
+}
+
+function issueById(issueId) {
+  if (!state.job) return null;
+  return state.job.issues.find((issue) => issue.id === issueId) || null;
+}
+
+function findRemediationSummary() {
+  if (!state.job) return null;
+  for (const artifact of state.job.output_artifacts || []) {
+    if (artifact.validation_report?.remediation_summary) {
+      return artifact.validation_report.remediation_summary;
+    }
+    if (artifact.validation_report?.validation_report?.remediation_summary) {
+      return artifact.validation_report.validation_report.remediation_summary;
+    }
+  }
+  return null;
+}
+
+function artifactLabel(artifact) {
+  if (artifact.type === "accessible_pdf") return "Accessible PDF";
+  if (artifact.type === "accessibility_report") return "Remediation Report";
+  return artifact.type.replaceAll("_", " ");
 }
 
 function setMessage(text, isError = false) {

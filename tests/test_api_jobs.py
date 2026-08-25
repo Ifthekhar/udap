@@ -20,13 +20,18 @@ class ApiJobsTest(unittest.TestCase):
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Document Accessibility Workflow", page_response.text)
         self.assertIn("/static/app.css", page_response.text)
+        self.assertIn("Existing job ID", page_response.text)
+        self.assertIn("remediation-summary", page_response.text)
         self.assertEqual(css_response.headers["content-type"], "text/css; charset=utf-8")
         self.assertIn("workflow-grid", css_response.text)
+        self.assertIn("inline-form", css_response.text)
         self.assertEqual(
             js_response.headers["content-type"],
             "application/javascript",
         )
         self.assertIn("/documents/analyse", js_response.text)
+        self.assertIn("visibleSuggestions", js_response.text)
+        self.assertIn("Remediation Report", js_response.text)
 
     def test_upload_get_and_review_job(self):
         with tempfile.TemporaryDirectory() as job_dir:

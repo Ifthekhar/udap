@@ -28,7 +28,7 @@ This repository currently contains the PDF-first backend foundation:
 - Generated-output remediation summaries for fixed, remaining, manual-review, and rejected issues
 - Local JSON job persistence
 - FastAPI endpoints for upload, analysis, job retrieval, review, and downloads
-- Backend-served workflow UI for upload, review, generation, and artifact downloads
+- Backend-served workflow UI for upload, job reload, review, generation, remediation summary, and artifact downloads
 - Tests for extraction, rules, suggestions, review, and persisted jobs
 
 ## Local Setup
