@@ -705,11 +705,13 @@ function renderReport() {
 
   reportStatus.innerHTML = [
     metric(statusText(report.pdf_ua?.status), "PDF/UA"),
+    metric(statusText(report.pdf_structure?.status), "PDF structure"),
     metric(statusText(report.structure_plan?.status), "Structure"),
     metric(report.summary?.initial_issue_count ?? 0, "Generated issues"),
   ].join("");
 
   reportDetails.innerHTML = [
+    reportCheckSection("Generated PDF checks", report.pdf_structure?.checks),
     reportSection("Fixed issues", remediation.fixed_issues),
     reportSection("Remaining issues", remediation.remaining_issues),
     reportSection("Manual review", remediation.manual_review_items),
@@ -758,6 +760,13 @@ function reportSection(title, items) {
   const list = items && items.length
     ? `<ul>${items.map((item) => `<li><strong>${escapeHtml(item.issue_type.replaceAll("_", " "))}</strong>: ${escapeHtml(item.explanation)}</li>`).join("")}</ul>`
     : `<p class="empty">None.</p>`;
+  return `<section class="report-section"><h3>${escapeHtml(title)}</h3>${list}</section>`;
+}
+
+function reportCheckSection(title, checks) {
+  const list = checks && checks.length
+    ? `<ul>${checks.map((check) => `<li><span class="tag ${check.passed ? "ok" : "error"}">${escapeHtml(check.status)}</span> <strong>${escapeHtml(check.label)}</strong>: ${escapeHtml(check.details)}</li>`).join("")}</ul>`
+    : `<p class="empty">No generated-PDF checks available.</p>`;
   return `<section class="report-section"><h3>${escapeHtml(title)}</h3>${list}</section>`;
 }
 

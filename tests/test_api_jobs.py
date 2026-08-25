@@ -37,6 +37,8 @@ class ApiJobsTest(unittest.TestCase):
         self.assertIn("Remediation Report", js_response.text)
         self.assertIn("Fixed issues", js_response.text)
         self.assertIn("PDF/UA", js_response.text)
+        self.assertIn("PDF structure", js_response.text)
+        self.assertIn("Generated PDF checks", js_response.text)
 
     def test_upload_get_and_review_job(self):
         with tempfile.TemporaryDirectory() as job_dir:

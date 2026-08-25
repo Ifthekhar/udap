@@ -66,6 +66,12 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(artifact.validation_report["structure_plan"]["status"], "embedded_minimal")
         self.assertEqual(artifact.validation_report["structure_plan"]["role_counts"]["H1"], 1)
         self.assertEqual(artifact.validation_report["structure_plan"]["role_counts"]["P"], 1)
+        self.assertEqual(artifact.validation_report["pdf_structure"]["status"], "passed")
+        self.assertEqual(artifact.validation_report["pdf_structure"]["summary"]["failed_count"], 0)
+        self.assertEqual(
+            artifact.validation_report["pdf_structure"]["role_counts"],
+            {"H1": 1, "P": 1},
+        )
         self.assertNotIn(
             "untagged_pdf",
             artifact.validation_report["summary"]["issue_type_counts"],
@@ -93,6 +99,7 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(payload["artifact_type"], "accessibility_report")
         self.assertEqual(payload["source_artifact"]["id"], pdf_artifact.id)
         self.assertIn("remediation_summary", payload["validation_report"])
+        self.assertIn("pdf_structure", payload["validation_report"])
         self.assertEqual(report_artifact.validation_report, payload)
 
     def test_report_artifact_uses_pdf_validation_payload(self):
@@ -341,7 +348,31 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(generated.pdf.parent_tree_entry_count, 1)
         self.assertEqual(generated.pdf.structure_element_count, 1)
         self.assertEqual(artifact.validation_report["structure_plan"]["role_counts"]["Figure"], 1)
+        self.assertEqual(artifact.validation_report["pdf_structure"]["status"], "passed")
         self.assertFalse(artifact.validation_report["structure_plan"]["mappings"][0]["decorative"])
+
+    def test_structural_validation_flags_missing_figure_alt(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="figure-without-alt.pdf",
+                source_format="pdf",
+                title="Figure Without Alt",
+                language="en-AU",
+                elements=[DocumentElement(type=ElementType.IMAGE)],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(result, output_dir=tmp)
+
+        structure = artifact.validation_report["pdf_structure"]
+        failed_checks = {
+            check["id"]: check for check in structure["checks"] if check["status"] == "failed"
+        }
+
+        self.assertEqual(structure["status"], "failed")
+        self.assertIn("structure.figures_have_alt", failed_checks)
+        self.assertEqual(structure["counts"]["figure_count"], 1)
 
     def test_image_structure_uses_reviewed_alt_text(self):
         result = analyse_document(
@@ -447,6 +478,11 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(generated.pdf.marked_content_count, 6)
         self.assertEqual(generated.pdf.parent_tree_entry_count, 6)
         self.assertEqual(generated.pdf.structure_element_count, 10)
+        self.assertEqual(artifact.validation_report["pdf_structure"]["status"], "passed")
+        self.assertEqual(
+            artifact.validation_report["pdf_structure"]["role_counts"],
+            {"Table": 1, "TR": 3, "TH": 2, "TD": 4},
+        )
         self.assertEqual(artifact.validation_report["structure_plan"]["role_counts"]["Table"], 1)
         self.assertEqual(
             artifact.validation_report["structure_plan"]["mappings"][0]["table_rows"],

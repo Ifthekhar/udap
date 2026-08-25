@@ -25,6 +25,7 @@ This repository currently contains the PDF-first backend foundation:
 - Optional PDF/UA validation through `veraPDF`
 - Minimal logical structure tree embedding for generated PDF content
 - MCID and parent-tree association checks for generated PDF tags
+- Generated-PDF structural validation for tags, MCIDs, figures, links, and simple tables
 - Generated-output remediation summaries for fixed, remaining, manual-review, and rejected issues
 - Local JSON job persistence
 - FastAPI endpoints for upload, analysis, job retrieval, review, and downloads
@@ -89,7 +90,9 @@ are marked in the structure plan and receive empty `/Alt` text. Simple text tabl
 are rebuilt with `/Table`, `/TR`, `/TH`, and `/TD` structure elements. Full PDF/UA
 compliance is not claimed yet. Generated artifact reports include a remediation
 summary that separates fixed issues, remaining generated-output issues, manual
-review items, and user-rejected issues.
+review items, and user-rejected issues. They also include generated-PDF
+structural checks for the tag tree, parent-tree MCID mappings, figure alternate
+text entries, link annotation references, and simple table roles.
 
 ## Product Docs
 

@@ -23,7 +23,7 @@ from .models import (
     SuggestionAction,
 )
 from .pdf_tagging import PdfTaggingError, apply_minimal_structure_tree
-from .pdf_validation import validate_pdf_ua, validation_to_dict
+from .pdf_validation import validate_generated_pdf_structure, validate_pdf_ua, validation_to_dict
 from .pipeline import analyse_document, build_validation_report
 
 
@@ -125,6 +125,7 @@ def generate_remediated_pdf(
     validation["remediation_summary"] = _build_remediation_summary(result, generated_analysis)
     validation["pdf_ua"] = validation_to_dict(validate_pdf_ua(path))
     validation["structure_plan"] = structure_plan
+    validation["pdf_structure"] = validate_generated_pdf_structure(path, structure_plan)
 
     return OutputArtifact(
         id=str(uuid4()),
