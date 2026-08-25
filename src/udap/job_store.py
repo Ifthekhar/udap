@@ -8,7 +8,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from .models import AnalysisJob, AnalysisResult, IssueStatus, JobStatus, UserDecision
+from .models import (
+    AnalysisJob,
+    AnalysisResult,
+    IssueStatus,
+    JobStatus,
+    OutputArtifact,
+    UserDecision,
+)
 from .review import record_user_decisions
 from .serialization import job_from_dict, job_to_dict
 
@@ -53,6 +60,17 @@ class LocalJobStore:
             result=reviewed_result,
             status=_job_status(reviewed_result),
             updated_at=_now(),
+        )
+        self.save(updated)
+        return updated
+
+    def add_output_artifact(self, job_id: str, artifact: OutputArtifact) -> AnalysisJob:
+        job = self.get(job_id)
+        updated = replace(
+            job,
+            status=JobStatus.OUTPUT_GENERATED,
+            updated_at=_now(),
+            output_artifacts=[*job.output_artifacts, artifact],
         )
         self.save(updated)
         return updated

@@ -7,11 +7,13 @@ from tempfile import NamedTemporaryFile
 from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .extractors import MissingExtractorDependencyError, UnsupportedDocumentError, load_document
 from .job_store import JobNotFoundError, LocalJobStore
 from .models import ReviewDecision, UserDecision
+from .pdf_output import PdfGenerationError, generate_remediated_pdf
 from .pipeline import analyse_document, build_job_report
 from .review import ReviewWorkflowError
 
@@ -94,6 +96,39 @@ def create_app():
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         return build_job_report(job)
+
+    @app.post("/jobs/{job_id}/outputs/pdf")
+    async def generate_pdf_output(job_id: str) -> dict:
+        try:
+            job = store.get(job_id)
+            artifact = generate_remediated_pdf(job.result)
+            updated = store.add_output_artifact(job_id, artifact)
+        except JobNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Job not found.") from exc
+        except PdfGenerationError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        return build_job_report(updated)
+
+    @app.get("/jobs/{job_id}/outputs/{artifact_id}")
+    async def download_output(job_id: str, artifact_id: str):
+        try:
+            job = store.get(job_id)
+        except JobNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Job not found.") from exc
+
+        artifact = next(
+            (item for item in job.output_artifacts if item.id == artifact_id),
+            None,
+        )
+        if artifact is None:
+            raise HTTPException(status_code=404, detail="Output artifact not found.")
+
+        return FileResponse(
+            artifact.path,
+            media_type="application/pdf",
+            filename=artifact.filename,
+        )
 
     @app.post("/reviews/apply")
     async def apply_review_decisions(payload: list[ReviewDecisionPayload]) -> dict:

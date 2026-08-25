@@ -78,4 +78,5 @@ def build_job_report(job: AnalysisJob) -> dict[str, Any]:
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
+    report["output_artifacts"] = [asdict(artifact) for artifact in job.output_artifacts]
     return report

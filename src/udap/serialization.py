@@ -18,6 +18,8 @@ from .models import (
     IssueSeverity,
     IssueStatus,
     JobStatus,
+    OutputArtifact,
+    OutputArtifactType,
     PdfInspection,
     RemediationSuggestion,
     SourceLocation,
@@ -37,6 +39,9 @@ def job_from_dict(data: dict[str, Any]) -> AnalysisJob:
         status=JobStatus(data["status"]),
         created_at=str(data["created_at"]),
         updated_at=str(data["updated_at"]),
+        output_artifacts=[
+            output_artifact_from_dict(item) for item in data.get("output_artifacts", [])
+        ],
     )
 
 
@@ -143,4 +148,15 @@ def audit_event_from_dict(data: dict[str, Any]) -> AuditEvent:
         suggestion_id=data.get("suggestion_id"),
         message=str(data["message"]),
         metadata=dict(data.get("metadata", {})),
+    )
+
+
+def output_artifact_from_dict(data: dict[str, Any]) -> OutputArtifact:
+    return OutputArtifact(
+        id=str(data["id"]),
+        type=OutputArtifactType(data["type"]),
+        filename=str(data["filename"]),
+        path=str(data["path"]),
+        created_at=str(data["created_at"]),
+        validation_report=dict(data.get("validation_report", {})),
     )

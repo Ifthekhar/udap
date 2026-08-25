@@ -58,6 +58,17 @@ class ApiJobsTest(unittest.TestCase):
             self.assertEqual(reviewed["issues"][0]["final_status"], "accepted")
             self.assertEqual(reviewed["audit_events"][-1]["type"], "user_decision_recorded")
 
+            output_response = client.post(f"/jobs/{job_id}/outputs/pdf")
+            self.assertEqual(output_response.status_code, 200)
+            output_payload = output_response.json()
+            self.assertEqual(output_payload["job"]["status"], "output_generated")
+            artifact = output_payload["output_artifacts"][0]
+            self.assertEqual(artifact["filename"], "sample_accessible.pdf")
+
+            download_response = client.get(f"/jobs/{job_id}/outputs/{artifact['id']}")
+            self.assertEqual(download_response.status_code, 200)
+            self.assertEqual(download_response.headers["content-type"], "application/pdf")
+
 
 def _build_single_issue_pdf() -> Path:
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:

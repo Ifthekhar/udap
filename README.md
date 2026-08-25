@@ -20,6 +20,9 @@ This repository currently contains the PDF-first backend foundation:
 - Deterministic analysis engine for the first issue categories
 - Remediation suggestion generation
 - Accept/edit/reject review workflow
+- First-pass remediated PDF generation
+- Optional PDF/UA validation through `veraPDF`
+- Minimal logical structure tree embedding for generated PDF content
 - Local JSON job persistence
 - FastAPI endpoints for upload, analysis, job retrieval, and review
 - Tests for extraction, rules, suggestions, review, and persisted jobs
@@ -47,6 +50,8 @@ POST /documents/analyse
 POST /documents/analyze
 GET  /jobs/{job_id}
 POST /jobs/{job_id}/review
+POST /jobs/{job_id}/outputs/pdf
+GET  /jobs/{job_id}/outputs/{artifact_id}
 ```
 
 By default, local analysis jobs are stored under `.local/jobs`. Override with:
@@ -54,6 +59,14 @@ By default, local analysis jobs are stored under `.local/jobs`. Override with:
 ```bash
 export UDAP_JOB_STORE_DIR=/path/to/jobs
 ```
+
+PDF/UA validation is run with `veraPDF` when the `verapdf` command is installed.
+If it is not installed, artifact reports explicitly mark PDF/UA validation as
+`unavailable`.
+
+Generated PDFs currently include title metadata, language metadata, readable text,
+simple link annotations, `/MarkInfo`, and a minimal `/StructTreeRoot`. Full
+PDF/UA compliance is not claimed yet.
 
 ## Product Docs
 

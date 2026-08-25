@@ -74,6 +74,11 @@ class AuditEventType(StrEnum):
 class JobStatus(StrEnum):
     AWAITING_REVIEW = "awaiting_review"
     REVIEWED = "reviewed"
+    OUTPUT_GENERATED = "output_generated"
+
+
+class OutputArtifactType(StrEnum):
+    ACCESSIBLE_PDF = "accessible_pdf"
 
 
 @dataclass(frozen=True)
@@ -257,3 +262,14 @@ class AnalysisJob:
     status: JobStatus
     created_at: str
     updated_at: str
+    output_artifacts: list[OutputArtifact] = field(default_factory=list)
+
+
+@dataclass
+class OutputArtifact:
+    id: str
+    type: OutputArtifactType
+    filename: str
+    path: str
+    created_at: str
+    validation_report: dict[str, Any]
