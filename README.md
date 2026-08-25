@@ -105,3 +105,38 @@ hierarchy, and simple table roles.
 
 Demo samples, the demo talk track, and an automated end-to-end rehearsal live in
 `demo/`.
+
+To rehearse the controlled customer demo:
+
+```bash
+python demo/rehearse_demo.py
+```
+
+To run the UI demo:
+
+```bash
+uvicorn udap.api:create_app --factory --reload
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/
+```
+
+Upload:
+
+```text
+demo/samples/udap-demo-needs-review.pdf
+```
+
+Demo flow:
+
+```text
+Upload -> Analyse -> Review suggestions -> Generate PDF and report -> Download artifacts
+```
+
+After the demo, the next product build step is improving real-world PDF
+extraction for customer files: heading detection, list detection, simple table
+detection, image context, duplicated text/link annotations, and multi-column
+reading order.
