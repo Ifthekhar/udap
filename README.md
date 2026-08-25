@@ -30,7 +30,7 @@ This repository currently contains the PDF-first backend foundation:
 - Local JSON job persistence
 - FastAPI endpoints for upload, analysis, job retrieval, review, and downloads
 - Backend-served workflow UI for upload, job reload, review, generation, remediation summary, human-readable report view, and artifact downloads
-- Tests for extraction, rules, suggestions, review, and persisted jobs
+- Tests for extraction, rules, suggestions, review, persisted jobs, and generated-PDF structural regression fixtures
 
 ## Local Setup
 
