@@ -70,7 +70,7 @@ def validate_generated_pdf_structure(
     These checks are intentionally narrower than PDF/UA. They verify the core
     relationships this MVP writes itself: marked content, parent-tree mappings,
     link annotation structure references, figure alt attributes, and simple
-    table roles.
+    table and list roles.
     """
 
     try:
@@ -163,6 +163,14 @@ def validate_generated_pdf_structure(
             if actual["tables_missing_required_roles"] == 0
             else f"{actual['tables_missing_required_roles']} /Table element(s) are missing required row or cell roles.",
         ),
+        _check(
+            "structure.lists_have_roles",
+            "Lists include item, label, and body roles",
+            actual["lists_missing_required_roles"] == 0,
+            "Every /L includes /LI items with /Lbl and /LBody children."
+            if actual["lists_missing_required_roles"] == 0
+            else f"{actual['lists_missing_required_roles']} /L element(s) are missing required list roles.",
+        ),
     ]
     if structure_plan:
         checks.append(_planned_mapping_check(actual, structure_plan))
@@ -192,6 +200,7 @@ def validate_generated_pdf_structure(
             "figure_count": actual["figure_count"],
             "link_count": actual["link_count"],
             "table_count": actual["table_count"],
+            "list_count": actual["list_count"],
         },
         "role_counts": actual["role_counts"],
         "checks": checks,
@@ -253,6 +262,7 @@ def _inspect_structure(reader: Any) -> dict[str, Any]:
         "figure_count": role_counts.get("Figure", 0),
         "link_count": role_counts.get("Link", 0),
         "table_count": role_counts.get("Table", 0),
+        "list_count": role_counts.get("L", 0),
         "role_counts": role_counts,
         "top_level_role_counts": top_level_role_counts,
         "mcids_have_parent_tree_entries": _mcids_have_parent_tree_entries(
@@ -267,6 +277,7 @@ def _inspect_structure(reader: Any) -> dict[str, Any]:
             parent_tree_entries,
         ),
         "tables_missing_required_roles": _tables_missing_required_roles(elements),
+        "lists_missing_required_roles": _lists_missing_required_roles(elements),
         "page_marked_content_counts": page_marked_content_counts,
     }
 
@@ -289,12 +300,16 @@ def _planned_mapping_check(actual: dict[str, Any], structure_plan: dict[str, Any
     if not isinstance(expected_role_counts, dict):
         expected_role_counts = {}
 
-    missing_roles = {
-        str(role): count
-        for role, count in expected_role_counts.items()
-        if actual["top_level_role_counts"].get(str(role), 0) < int(count)
-    }
-    expected_count = len(expected_mappings)
+    missing_roles = {}
+    for role, count in expected_role_counts.items():
+        role_name = str(role)
+        actual_count = actual["role_counts"].get(role_name, 0)
+        if role_name not in {"LI", "Lbl", "LBody"}:
+            actual_count = actual["top_level_role_counts"].get(role_name, 0)
+        if actual_count < int(count):
+            missing_roles[role_name] = count
+
+    expected_count = _expected_top_level_mapping_count(expected_mappings)
     actual_count = actual["top_level_structure_element_count"]
     passed = actual_count >= expected_count and not missing_roles
     details = (
@@ -318,6 +333,32 @@ def _mcid_parent_tree_details(actual: dict[str, Any]) -> str:
         "One or more pages with marked content are missing /StructParents or a large enough "
         "parent-tree array."
     )
+
+
+def _expected_top_level_mapping_count(mappings: list[Any]) -> int:
+    count = 0
+    index = 0
+    while index < len(mappings):
+        mapping = mappings[index]
+        role = str(mapping.get("pdf_role") or "P") if hasattr(mapping, "get") else "P"
+        if role != "LI":
+            count += 1
+            index += 1
+            continue
+
+        count += 1
+        page_index = mapping.get("page_index", 0) if hasattr(mapping, "get") else 0
+        index += 1
+        while index < len(mappings):
+            candidate = mappings[index]
+            candidate_role = (
+                str(candidate.get("pdf_role") or "P") if hasattr(candidate, "get") else "P"
+            )
+            candidate_page = candidate.get("page_index", 0) if hasattr(candidate, "get") else 0
+            if candidate_role != "LI" or candidate_page != page_index:
+                break
+            index += 1
+    return count
 
 
 def _resolve(value: Any) -> Any:
@@ -502,5 +543,31 @@ def _tables_missing_required_roles(elements: list[Any]) -> int:
                 invalid_row = True
             cell_roles.extend(row_roles)
         if invalid_row or "TH" not in cell_roles or "TD" not in cell_roles:
+            missing += 1
+    return missing
+
+
+def _lists_missing_required_roles(elements: list[Any]) -> int:
+    missing = 0
+    for list_element in [element for element in elements if element.get("/S") == "/L"]:
+        items = [
+            _resolve(item)
+            for item in _as_list(list_element.get("/K"))
+            if isinstance(_resolve(item), dict) and _resolve(item).get("/S") == "/LI"
+        ]
+        if not items:
+            missing += 1
+            continue
+
+        invalid_item = False
+        for item in items:
+            child_roles = {
+                _role_name(child.get("/S"))
+                for child in [_resolve(child) for child in _as_list(item.get("/K"))]
+                if isinstance(child, dict)
+            }
+            if "Lbl" not in child_roles or "LBody" not in child_roles:
+                invalid_item = True
+        if invalid_item:
             missing += 1
     return missing

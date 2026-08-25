@@ -25,7 +25,7 @@ This repository currently contains the PDF-first backend foundation:
 - Optional PDF/UA validation through `veraPDF`
 - Minimal logical structure tree embedding for generated PDF content
 - MCID and parent-tree association checks for generated PDF tags
-- Generated-PDF structural validation for tags, MCIDs, figures, links, and simple tables
+- Generated-PDF structural validation for tags, MCIDs, figures, links, lists, and simple tables
 - Generated-output remediation summaries for fixed, remaining, manual-review, and rejected issues
 - Local JSON job persistence
 - FastAPI endpoints for upload, analysis, job retrieval, review, and downloads
@@ -87,12 +87,14 @@ with `/OBJR` entries and annotation `/StructParent` mappings. Image elements are
 rebuilt as generated figure placeholders with `/Figure` structure elements and
 `/Alt` text from the source model or accepted review decisions; decorative images
 are marked in the structure plan and receive empty `/Alt` text. Simple text tables
-are rebuilt with `/Table`, `/TR`, `/TH`, and `/TD` structure elements. Full PDF/UA
-compliance is not claimed yet. Generated artifact reports include a remediation
-summary that separates fixed issues, remaining generated-output issues, manual
-review items, and user-rejected issues. They also include generated-PDF
-structural checks for the tag tree, parent-tree MCID mappings, figure alternate
-text entries, link annotation references, and simple table roles.
+are rebuilt with `/Table`, `/TR`, `/TH`, and `/TD` structure elements. List items
+are grouped under `/L` containers with `/LI`, `/Lbl`, and `/LBody` structure.
+Full PDF/UA compliance is not claimed yet. Generated artifact reports include a
+remediation summary that separates fixed issues, remaining generated-output
+issues, manual review items, and user-rejected issues. They also include
+generated-PDF structural checks for the tag tree, parent-tree MCID mappings,
+figure alternate text entries, link annotation references, list hierarchy, and
+simple table roles.
 
 ## Product Docs
 

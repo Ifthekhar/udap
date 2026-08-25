@@ -20,6 +20,7 @@ class PdfRegressionCase:
     expected_figure_alt: str | None = None
     expected_link_count: int = 0
     expected_table_count: int = 0
+    expected_list_count: int = 0
     expected_wrapped_mcid_count: int | None = None
     minimum_text_block_count: int | None = None
     expected_checks: set[str] = field(
@@ -31,6 +32,7 @@ class PdfRegressionCase:
             "structure.links_reference_annotations",
             "structure.link_annotations_mapped",
             "structure.tables_have_roles",
+            "structure.lists_have_roles",
             "structure.matches_plan",
         }
     )
@@ -150,6 +152,26 @@ def generated_pdf_regression_cases() -> list[PdfRegressionCase]:
             expected_structure_element_count=10,
             expected_page_count=1,
             expected_table_count=1,
+        ),
+        PdfRegressionCase(
+            name="simple_list",
+            document=DocumentModel(
+                original_filename="simple-list.pdf",
+                source_format="pdf",
+                title="Simple List",
+                language="en-AU",
+                elements=[
+                    DocumentElement(type=ElementType.LIST_ITEM, text="Check source metadata."),
+                    DocumentElement(type=ElementType.LIST_ITEM, text="Generate tagged PDF output."),
+                ],
+            ),
+            expected_top_level_roles={"LI": 2},
+            expected_role_counts={"L": 1, "LI": 2, "Lbl": 2, "LBody": 2},
+            expected_marked_content_count=2,
+            expected_parent_tree_entry_count=2,
+            expected_structure_element_count=7,
+            expected_page_count=1,
+            expected_list_count=1,
         ),
         PdfRegressionCase(
             name="wrapped_paragraph",

@@ -101,6 +101,7 @@ def generate_remediated_pdf(
                 "decorative": element.decorative,
                 "table_rows": table_rows,
                 "table_header_count": len(element.table_headers),
+                "list_label": _list_label_for_element(element),
             }
         )
 
@@ -411,6 +412,8 @@ def _write_element(
         return _write_table(page, cursor_y, pymupdf, rows=table_rows or [])
 
     text = element.text.replace("\n", " ").strip()
+    if element.type == ElementType.LIST_ITEM:
+        text = f"{_list_label_for_element(element)} {text}".strip()
     lines = wrap(text, width=width_chars) or [text]
 
     for line in lines:
@@ -525,6 +528,15 @@ def _normalise_row(row: list[str]) -> list[str]:
 def _fit_cell_text(value: str) -> str:
     text = value.replace("\n", " ").strip()
     return text if len(text) <= 28 else f"{text[:25]}..."
+
+
+def _list_label_for_element(element: DocumentElement) -> str:
+    if element.type != ElementType.LIST_ITEM:
+        return ""
+    value = element.metadata.get("list_label")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return "-"
 
 
 def _escape_pdf_string(value: str) -> str:

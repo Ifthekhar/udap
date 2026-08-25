@@ -58,10 +58,108 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
     wrapping_plan_by_page: dict[int, list[dict[str, int]]] = {}
     link_annotations_by_page = _link_annotation_refs_by_page(writer)
     annotation_parent_key = len(writer.pages)
-    for mapping in mappings:
+    mapping_index = 0
+    while mapping_index < len(mappings):
+        mapping = mappings[mapping_index]
         role = str(mapping.get("pdf_role") or "P")
         page_index = _mapping_page_index(mapping, page_count=len(writer.pages))
         page_ref = _page_reference(writer, page_index)
+        if role == "LI":
+            list_mappings: list[Any] = []
+            while mapping_index < len(mappings):
+                candidate = mappings[mapping_index]
+                if str(candidate.get("pdf_role") or "P") != "LI":
+                    break
+                candidate_page_index = _mapping_page_index(candidate, page_count=len(writer.pages))
+                if candidate_page_index != page_index:
+                    break
+                list_mappings.append(candidate)
+                mapping_index += 1
+
+            list_element = DictionaryObject(
+                {
+                    NameObject("/Type"): NameObject("/StructElem"),
+                    NameObject("/S"): NameObject("/L"),
+                    NameObject("/P"): struct_tree_ref,
+                    NameObject("/T"): TextStringObject("List"),
+                    NameObject("/K"): ArrayObject(),
+                }
+            )
+            if page_ref is not None:
+                list_element[NameObject("/Pg")] = page_ref
+            list_ref = writer._add_object(list_element)
+            item_refs = ArrayObject()
+
+            for list_mapping in list_mappings:
+                mcid = mcid_by_page.get(page_index, 0)
+                mcid_by_page[page_index] = mcid + 1
+                mcr = DictionaryObject(
+                    {
+                        NameObject("/Type"): NameObject("/MCR"),
+                        NameObject("/MCID"): NumberObject(mcid),
+                    }
+                )
+                if page_ref is not None:
+                    mcr[NameObject("/Pg")] = page_ref
+
+                item_element = DictionaryObject(
+                    {
+                        NameObject("/Type"): NameObject("/StructElem"),
+                        NameObject("/S"): NameObject("/LI"),
+                        NameObject("/P"): list_ref,
+                        NameObject("/T"): TextStringObject(
+                            str(list_mapping.get("text_preview") or "List item")
+                        ),
+                        NameObject("/K"): ArrayObject(),
+                    }
+                )
+                if page_ref is not None:
+                    item_element[NameObject("/Pg")] = page_ref
+                item_ref = writer._add_object(item_element)
+
+                label_element = DictionaryObject(
+                    {
+                        NameObject("/Type"): NameObject("/StructElem"),
+                        NameObject("/S"): NameObject("/Lbl"),
+                        NameObject("/P"): item_ref,
+                        NameObject("/T"): TextStringObject(
+                            str(list_mapping.get("list_label") or "-")
+                        ),
+                    }
+                )
+                if page_ref is not None:
+                    label_element[NameObject("/Pg")] = page_ref
+                label_ref = writer._add_object(label_element)
+
+                body_element = DictionaryObject(
+                    {
+                        NameObject("/Type"): NameObject("/StructElem"),
+                        NameObject("/S"): NameObject("/LBody"),
+                        NameObject("/P"): item_ref,
+                        NameObject("/T"): TextStringObject(
+                            str(list_mapping.get("text_preview") or "List item")
+                        ),
+                        NameObject("/K"): mcr,
+                    }
+                )
+                if page_ref is not None:
+                    body_element[NameObject("/Pg")] = page_ref
+                body_ref = writer._add_object(body_element)
+
+                item_element[NameObject("/K")] = ArrayObject([label_ref, body_ref])
+                item_refs.append(item_ref)
+                parent_tree_entries.setdefault(page_index, ArrayObject()).append(body_ref)
+                wrapping_plan_by_page.setdefault(page_index, []).append(
+                    {
+                        "mcid": mcid,
+                        "content_block_count": _mapping_content_block_count(list_mapping),
+                    }
+                )
+
+            list_element[NameObject("/K")] = item_refs
+            children.append(list_ref)
+            continue
+
         table_rows = _mapping_table_rows(mapping)
         if role == "Table" and table_rows:
             table_element = DictionaryObject(
@@ -133,6 +231,7 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
 
             table_element[NameObject("/K")] = row_refs
             children.append(table_ref)
+            mapping_index += 1
             continue
 
         mcid = mcid_by_page.get(page_index, 0)
@@ -190,6 +289,7 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
                 "content_block_count": _mapping_content_block_count(mapping),
             }
         )
+        mapping_index += 1
 
     struct_tree[NameObject("/K")] = children
     parent_tree[NameObject("/Nums")] = _build_parent_tree_nums(parent_tree_entries)

@@ -43,6 +43,10 @@ class PdfStructureRegressionTest(unittest.TestCase):
                     report_structure["counts"]["table_count"],
                     case.expected_table_count,
                 )
+                self.assertEqual(
+                    report_structure["counts"]["list_count"],
+                    case.expected_list_count,
+                )
                 self.assertEqual(report_structure["role_counts"], case.expected_role_counts)
                 self.assertEqual(
                     artifact.validation_report["structure_plan"]["role_counts"],
@@ -59,6 +63,12 @@ class PdfStructureRegressionTest(unittest.TestCase):
                     self.assertEqual(len(reader.pages), case.expected_page_count)
                 if case.expected_figure_alt is not None:
                     self.assertEqual(_first_structure_element(reader)["/Alt"], case.expected_figure_alt)
+                if case.expected_list_count:
+                    self.assertEqual(_first_structure_element(reader)["/S"], "/L")
+                    self.assertEqual(
+                        _list_item_child_roles(_first_structure_element(reader)),
+                        [["Lbl", "LBody"], ["Lbl", "LBody"]],
+                    )
                 if case.expected_wrapped_mcid_count is not None:
                     content = reader.pages[0].get_contents().get_data().decode("latin-1")
                     self.assertEqual(content.count("/MCID"), case.expected_wrapped_mcid_count)
@@ -92,6 +102,13 @@ class PdfStructureRegressionTest(unittest.TestCase):
 def _first_structure_element(reader: PdfReader):
     struct_tree = reader.trailer["/Root"]["/StructTreeRoot"].get_object()
     return struct_tree["/K"][0].get_object()
+
+
+def _list_item_child_roles(list_element) -> list[list[str]]:
+    return [
+        [str(child.get_object()["/S"]).removeprefix("/") for child in item_ref.get_object()["/K"]]
+        for item_ref in list_element["/K"]
+    ]
 
 
 if __name__ == "__main__":
