@@ -12,8 +12,10 @@ from .extractors import load_pdf
 from .models import (
     AccessibilityIssue,
     AnalysisResult,
+    AutomationStatus,
     DocumentElement,
     ElementType,
+    IssueStatus,
     OutputArtifact,
     OutputArtifactType,
     RemediationSuggestion,
@@ -108,7 +110,9 @@ def generate_remediated_pdf(
         structure_plan = _mark_structure_plan_failed(structure_plan, str(exc))
 
     generated_document = load_pdf(path)
-    validation = build_validation_report(analyse_document(generated_document))
+    generated_analysis = analyse_document(generated_document)
+    validation = build_validation_report(generated_analysis)
+    validation["remediation_summary"] = _build_remediation_summary(result, generated_analysis)
     validation["pdf_ua"] = validation_to_dict(validate_pdf_ua(path))
     validation["structure_plan"] = structure_plan
 
@@ -138,6 +142,69 @@ def _resolved_value(result: AnalysisResult, action: SuggestionAction) -> str | N
         if suggestion.proposed_value:
             return suggestion.proposed_value.strip()
     return None
+
+
+def _build_remediation_summary(
+    source_result: AnalysisResult,
+    generated_result: AnalysisResult,
+) -> dict:
+    generated_issue_types = {issue.issue_type for issue in generated_result.issues}
+    rejected_issues = [
+        issue for issue in source_result.issues if issue.final_status == IssueStatus.REJECTED
+    ]
+    fixed_issues = [
+        issue
+        for issue in source_result.issues
+        if issue.final_status != IssueStatus.REJECTED and issue.issue_type not in generated_issue_types
+    ]
+    remaining_issues = list(generated_result.issues)
+    manual_review_items = [
+        issue
+        for issue in remaining_issues
+        if issue.automation_status
+        in {
+            AutomationStatus.NEEDS_USER_CONFIRMATION,
+            AutomationStatus.CANNOT_AUTOMATE,
+        }
+    ]
+
+    return {
+        "statement": (
+            "Generated output was analysed after remediation; legal compliance is not guaranteed."
+        ),
+        "fixed_issue_count": len(fixed_issues),
+        "remaining_issue_count": len(remaining_issues),
+        "manual_review_count": len(manual_review_items),
+        "rejected_issue_count": len(rejected_issues),
+        "fixed_issue_type_counts": _issue_type_counts(fixed_issues),
+        "remaining_issue_type_counts": _issue_type_counts(remaining_issues),
+        "manual_review_type_counts": _issue_type_counts(manual_review_items),
+        "rejected_issue_type_counts": _issue_type_counts(rejected_issues),
+        "fixed_issues": [_issue_report_item(issue) for issue in fixed_issues],
+        "remaining_issues": [_issue_report_item(issue) for issue in remaining_issues],
+        "manual_review_items": [_issue_report_item(issue) for issue in manual_review_items],
+        "rejected_issues": [_issue_report_item(issue) for issue in rejected_issues],
+    }
+
+
+def _issue_type_counts(issues: list[AccessibilityIssue]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for issue in issues:
+        counts[issue.issue_type] = counts.get(issue.issue_type, 0) + 1
+    return counts
+
+
+def _issue_report_item(issue: AccessibilityIssue) -> dict[str, str | float | None]:
+    return {
+        "id": issue.id,
+        "issue_type": issue.issue_type,
+        "severity": issue.severity.value,
+        "automation_status": issue.automation_status.value,
+        "final_status": issue.final_status.value,
+        "explanation": issue.explanation,
+        "suggested_fix": issue.suggested_fix,
+        "confidence": issue.confidence,
+    }
 
 
 def _resolved_image_alt_text(result: AnalysisResult, element: DocumentElement) -> str | None:

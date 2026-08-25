@@ -65,6 +65,7 @@ class PdfOutputTest(unittest.TestCase):
             "untagged_pdf",
             artifact.validation_report["summary"]["issue_type_counts"],
         )
+        self.assertEqual(artifact.validation_report["remediation_summary"]["remaining_issue_count"], 0)
 
     def test_generate_remediated_pdf_uses_reviewed_title_and_language(self):
         result = analyse_document(
@@ -106,6 +107,90 @@ class PdfOutputTest(unittest.TestCase):
 
         self.assertEqual(generated.title, "Reviewed Title")
         self.assertEqual(generated.language, "en-US")
+
+    def test_output_report_separates_fixed_and_remaining_issues(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="needs-fixes.pdf",
+                source_format="pdf",
+                elements=[
+                    DocumentElement(
+                        type=ElementType.IMAGE,
+                        source=SourceLocation(element_id="chart-1"),
+                        metadata={"nearby_text": "Annual revenue chart."},
+                    ),
+                ],
+            )
+        )
+        suggestion = next(
+            suggestion
+            for suggestion in result.suggestions
+            if suggestion.action.value == "generate_alt_text"
+        )
+        reviewed = record_user_decisions(
+            result,
+            [
+                UserDecision(
+                    suggestion_id=suggestion.id,
+                    issue_id=suggestion.issue_id,
+                    decision=ReviewDecision.EDIT,
+                    final_value="Bar chart showing annual revenue.",
+                )
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(reviewed, output_dir=tmp)
+
+        summary = artifact.validation_report["remediation_summary"]
+
+        self.assertGreaterEqual(summary["fixed_issue_count"], 3)
+        self.assertIn("missing_document_title", summary["fixed_issue_type_counts"])
+        self.assertIn("missing_document_language", summary["fixed_issue_type_counts"])
+        self.assertIn("missing_image_alt_text", summary["fixed_issue_type_counts"])
+        self.assertEqual(summary["remaining_issue_count"], 0)
+        self.assertEqual(summary["manual_review_count"], 0)
+
+    def test_output_report_keeps_rejected_and_remaining_review_items(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="rejected-table.pdf",
+                source_format="pdf",
+                title="Rejected Table",
+                language="en-AU",
+                elements=[
+                    DocumentElement(
+                        type=ElementType.TABLE,
+                        text="Revenue\t100\nCosts\t50",
+                    ),
+                ],
+            )
+        )
+        suggestion = next(
+            suggestion
+            for suggestion in result.suggestions
+            if suggestion.action.value == "confirm_table_headers"
+        )
+        reviewed = record_user_decisions(
+            result,
+            [
+                UserDecision(
+                    suggestion_id=suggestion.id,
+                    issue_id=suggestion.issue_id,
+                    decision=ReviewDecision.REJECT,
+                )
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(reviewed, output_dir=tmp)
+
+        summary = artifact.validation_report["remediation_summary"]
+
+        self.assertEqual(summary["rejected_issue_count"], 1)
+        self.assertEqual(summary["rejected_issue_type_counts"], {"missing_table_headers": 1})
+        self.assertIn("missing_heading_structure", summary["remaining_issue_type_counts"])
+        self.assertIn("missing_heading_structure", summary["manual_review_type_counts"])
 
     def test_multiline_element_uses_one_marked_content_section(self):
         result = analyse_document(
