@@ -7,7 +7,7 @@ from tempfile import NamedTemporaryFile
 from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 from .extractors import MissingExtractorDependencyError, UnsupportedDocumentError, load_document
@@ -16,6 +16,7 @@ from .models import OutputArtifactType, ReviewDecision, UserDecision
 from .pdf_output import PdfGenerationError, generate_remediated_pdf_outputs
 from .pipeline import analyse_document, build_job_report
 from .review import ReviewWorkflowError
+from .ui import APP_CSS, APP_HTML, APP_JS
 
 
 class ReviewDecisionPayload(BaseModel):
@@ -33,6 +34,18 @@ def create_app():
         description="PDF-first accessibility remediation API.",
     )
     store = LocalJobStore(os.environ.get("UDAP_JOB_STORE_DIR", ".local/jobs"))
+
+    @app.get("/", response_class=HTMLResponse)
+    async def workflow_app() -> str:
+        return APP_HTML
+
+    @app.get("/static/app.css")
+    async def app_css() -> Response:
+        return Response(APP_CSS, media_type="text/css")
+
+    @app.get("/static/app.js")
+    async def app_js() -> Response:
+        return Response(APP_JS, media_type="application/javascript")
 
     @app.get("/health")
     async def health() -> dict[str, str]:

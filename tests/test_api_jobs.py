@@ -10,6 +10,24 @@ from udap.api import create_app
 
 
 class ApiJobsTest(unittest.TestCase):
+    def test_workflow_ui_is_served(self):
+        client = TestClient(create_app())
+
+        page_response = client.get("/")
+        css_response = client.get("/static/app.css")
+        js_response = client.get("/static/app.js")
+
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Document Accessibility Workflow", page_response.text)
+        self.assertIn("/static/app.css", page_response.text)
+        self.assertEqual(css_response.headers["content-type"], "text/css; charset=utf-8")
+        self.assertIn("workflow-grid", css_response.text)
+        self.assertEqual(
+            js_response.headers["content-type"],
+            "application/javascript",
+        )
+        self.assertIn("/documents/analyse", js_response.text)
+
     def test_upload_get_and_review_job(self):
         with tempfile.TemporaryDirectory() as job_dir:
             previous = os.environ.get("UDAP_JOB_STORE_DIR")

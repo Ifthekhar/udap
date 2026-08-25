@@ -27,7 +27,8 @@ This repository currently contains the PDF-first backend foundation:
 - MCID and parent-tree association checks for generated PDF tags
 - Generated-output remediation summaries for fixed, remaining, manual-review, and rejected issues
 - Local JSON job persistence
-- FastAPI endpoints for upload, analysis, job retrieval, and review
+- FastAPI endpoints for upload, analysis, job retrieval, review, and downloads
+- Backend-served workflow UI for upload, review, generation, and artifact downloads
 - Tests for extraction, rules, suggestions, review, and persisted jobs
 
 ## Local Setup
@@ -43,6 +44,12 @@ Run the API:
 
 ```bash
 uvicorn udap.api:create_app --factory --reload
+```
+
+Open the workflow UI at:
+
+```text
+http://127.0.0.1:8000/
 ```
 
 Useful endpoints:
