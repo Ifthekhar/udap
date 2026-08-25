@@ -1,7 +1,9 @@
 import tempfile
 import unittest
+from pathlib import Path
 
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import ArrayObject, NameObject
 
 from tests.pdf_regression_cases import generated_pdf_regression_cases
 from udap.pdf_output import generate_remediated_pdf
@@ -120,6 +122,83 @@ class PdfStructureRegressionTest(unittest.TestCase):
         self.assertEqual(reading_order["actual_content_sequence"][29], {"role": "P", "page_index": 1})
         self.assertEqual(reading_order["actual_content_sequence"][-1], {"role": "P", "page_index": 1})
 
+    def test_validator_flags_pdf_missing_structure_tree(self):
+        case = next(item for item in generated_pdf_regression_cases() if item.name == "heading_paragraph")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(analyse_document(case.document), output_dir=tmp)
+            damaged_path = Path(tmp) / "missing-structure-tree.pdf"
+            _write_modified_pdf(
+                artifact.path,
+                damaged_path,
+                lambda writer: writer.root_object.pop(NameObject("/StructTreeRoot"), None),
+            )
+            structure = validate_generated_pdf_structure(
+                damaged_path,
+                artifact.validation_report["structure_plan"],
+            )
+
+        failed_checks = _failed_checks(structure)
+
+        self.assertEqual(structure["status"], "failed")
+        self.assertIn("structure.root_present", failed_checks)
+        self.assertIn("structure.reading_order_matches_plan", failed_checks)
+
+    def test_validator_flags_removed_figure_alt_text(self):
+        case = next(item for item in generated_pdf_regression_cases() if item.name == "figure_alt")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(analyse_document(case.document), output_dir=tmp)
+            damaged_path = Path(tmp) / "figure-without-alt.pdf"
+            _write_modified_pdf(artifact.path, damaged_path, _remove_first_figure_alt)
+            structure = validate_generated_pdf_structure(
+                damaged_path,
+                artifact.validation_report["structure_plan"],
+            )
+
+        failed_checks = _failed_checks(structure)
+
+        self.assertEqual(structure["status"], "failed")
+        self.assertIn("structure.figures_have_alt", failed_checks)
+
+    def test_validator_flags_broken_list_hierarchy(self):
+        case = next(item for item in generated_pdf_regression_cases() if item.name == "simple_list")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(analyse_document(case.document), output_dir=tmp)
+            damaged_path = Path(tmp) / "list-without-body.pdf"
+            _write_modified_pdf(artifact.path, damaged_path, _remove_first_list_body)
+            structure = validate_generated_pdf_structure(
+                damaged_path,
+                artifact.validation_report["structure_plan"],
+            )
+
+        failed_checks = _failed_checks(structure)
+
+        self.assertEqual(structure["status"], "failed")
+        self.assertIn("structure.lists_have_roles", failed_checks)
+
+    def test_validator_flags_reversed_reading_order(self):
+        case = next(item for item in generated_pdf_regression_cases() if item.name == "heading_paragraph")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(analyse_document(case.document), output_dir=tmp)
+            damaged_path = Path(tmp) / "reversed-reading-order.pdf"
+            _write_modified_pdf(artifact.path, damaged_path, _reverse_top_level_structure_order)
+            structure = validate_generated_pdf_structure(
+                damaged_path,
+                artifact.validation_report["structure_plan"],
+            )
+
+        failed_checks = _failed_checks(structure)
+        reading_order = structure["reading_order"]
+
+        self.assertEqual(structure["status"], "failed")
+        self.assertIn("structure.reading_order_matches_plan", failed_checks)
+        self.assertFalse(reading_order["top_level_order_matches_plan"])
+        self.assertFalse(reading_order["content_sequence_matches_plan"])
+        self.assertFalse(reading_order["mcids_increase_by_page"])
+
 
 def _first_structure_element(reader: PdfReader):
     struct_tree = reader.trailer["/Root"]["/StructTreeRoot"].get_object()
@@ -131,6 +210,63 @@ def _list_item_child_roles(list_element) -> list[list[str]]:
         [str(child.get_object()["/S"]).removeprefix("/") for child in item_ref.get_object()["/K"]]
         for item_ref in list_element["/K"]
     ]
+
+
+def _write_modified_pdf(source_path: str, output_path: Path, modifier) -> None:
+    reader = PdfReader(source_path)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(reader)
+    modifier(writer)
+    with output_path.open("wb") as handle:
+        writer.write(handle)
+
+
+def _remove_first_figure_alt(writer: PdfWriter) -> None:
+    for element in _structure_elements(writer):
+        if element.get("/S") == "/Figure":
+            element.pop(NameObject("/Alt"), None)
+            return
+    raise AssertionError("No /Figure structure element found.")
+
+
+def _remove_first_list_body(writer: PdfWriter) -> None:
+    for element in _structure_elements(writer):
+        if element.get("/S") != "/LI":
+            continue
+        children = [child for child in element["/K"] if child.get_object().get("/S") != "/LBody"]
+        element[NameObject("/K")] = ArrayObject(children)
+        return
+    raise AssertionError("No /LI structure element found.")
+
+
+def _reverse_top_level_structure_order(writer: PdfWriter) -> None:
+    struct_tree = writer.root_object["/StructTreeRoot"].get_object()
+    struct_tree[NameObject("/K")] = ArrayObject(reversed(struct_tree["/K"]))
+
+
+def _structure_elements(writer: PdfWriter):
+    struct_tree = writer.root_object["/StructTreeRoot"].get_object()
+    return _walk_structure(struct_tree["/K"])
+
+
+def _walk_structure(value) -> list:
+    if isinstance(value, list):
+        elements = []
+        for item in value:
+            elements.extend(_walk_structure(item))
+        return elements
+
+    resolved = value.get_object() if hasattr(value, "get_object") else value
+    if not hasattr(resolved, "get"):
+        return []
+
+    elements = [resolved] if resolved.get("/Type") == "/StructElem" else []
+    elements.extend(_walk_structure(resolved.get("/K", [])))
+    return elements
+
+
+def _failed_checks(structure: dict) -> set[str]:
+    return {check["id"] for check in structure["checks"] if check["status"] == "failed"}
 
 
 if __name__ == "__main__":
