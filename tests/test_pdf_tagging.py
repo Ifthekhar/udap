@@ -40,6 +40,9 @@ class PdfTaggingTest(unittest.TestCase):
         self.assertTrue(inspection.has_struct_tree)
         self.assertTrue(inspection.mark_info_marked)
         self.assertTrue(inspection.is_tagged)
+        self.assertEqual(inspection.marked_content_count, 1)
+        self.assertEqual(inspection.parent_tree_entry_count, 1)
+        self.assertEqual(inspection.structure_element_count, 1)
 
 
 if __name__ == "__main__":

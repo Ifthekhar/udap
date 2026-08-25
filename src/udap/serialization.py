@@ -109,6 +109,9 @@ def pdf_from_dict(data: dict[str, Any]) -> PdfInspection:
         heading_candidate_count=int(data.get("heading_candidate_count", 0)),
         table_candidate_count=int(data.get("table_candidate_count", 0)),
         pages_with_multiple_columns=list(data.get("pages_with_multiple_columns", [])),
+        marked_content_count=int(data.get("marked_content_count", 0)),
+        parent_tree_entry_count=int(data.get("parent_tree_entry_count", 0)),
+        structure_element_count=int(data.get("structure_element_count", 0)),
         extraction_warnings=list(data.get("extraction_warnings", [])),
     )
 

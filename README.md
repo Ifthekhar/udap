@@ -23,6 +23,7 @@ This repository currently contains the PDF-first backend foundation:
 - First-pass remediated PDF generation
 - Optional PDF/UA validation through `veraPDF`
 - Minimal logical structure tree embedding for generated PDF content
+- MCID and parent-tree association checks for generated PDF tags
 - Local JSON job persistence
 - FastAPI endpoints for upload, analysis, job retrieval, and review
 - Tests for extraction, rules, suggestions, review, and persisted jobs
@@ -65,7 +66,10 @@ If it is not installed, artifact reports explicitly mark PDF/UA validation as
 `unavailable`.
 
 Generated PDFs currently include title metadata, language metadata, readable text,
-simple link annotations, `/MarkInfo`, and a minimal `/StructTreeRoot`. Full
+simple link annotations, `/MarkInfo`, a minimal `/StructTreeRoot`, marked-content
+IDs, and parent-tree entries. The current MCID implementation is intentionally
+coarse: it associates generated page content with planned structure elements, but
+does not yet segment each element into its own precise content stream. Full
 PDF/UA compliance is not claimed yet.
 
 ## Product Docs

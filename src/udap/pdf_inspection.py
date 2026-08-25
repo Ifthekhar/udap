@@ -49,13 +49,21 @@ def _inspect_with_pypdf(path: Path) -> PdfInspection:
     root = _resolve(reader.trailer.get("/Root"))
     if isinstance(root, dict):
         inspection.language = _clean_pdf_value(root.get("/Lang"))
-        inspection.has_struct_tree = root.get("/StructTreeRoot") is not None
+        struct_tree = _resolve(root.get("/StructTreeRoot"))
+        inspection.has_struct_tree = struct_tree is not None
+        if isinstance(struct_tree, dict):
+            inspection.structure_element_count = _count_structure_elements(struct_tree.get("/K"))
+            parent_tree = _resolve(struct_tree.get("/ParentTree"))
+            if isinstance(parent_tree, dict):
+                inspection.parent_tree_entry_count = _count_parent_tree_entries(parent_tree)
 
         mark_info = _resolve(root.get("/MarkInfo"))
         if isinstance(mark_info, dict):
             inspection.mark_info_marked = bool(mark_info.get("/Marked"))
         else:
             inspection.mark_info_marked = False
+
+    inspection.marked_content_count = _count_marked_content_sequences(reader)
 
     return inspection
 
@@ -125,3 +133,45 @@ def _block_has_text(block: Any) -> bool:
     if not isinstance(block, (list, tuple)) or len(block) < 5:
         return False
     return bool(str(block[4]).strip())
+
+
+def _count_structure_elements(value: Any) -> int:
+    resolved = _resolve(value)
+    if resolved is None:
+        return 0
+    if isinstance(resolved, list):
+        return sum(_count_structure_elements(item) for item in resolved)
+    if not isinstance(resolved, dict):
+        return 0
+
+    count = 1 if resolved.get("/Type") == "/StructElem" else 0
+    return count + _count_structure_elements(resolved.get("/K"))
+
+
+def _count_parent_tree_entries(parent_tree: dict) -> int:
+    nums = _resolve(parent_tree.get("/Nums"))
+    if not isinstance(nums, list):
+        return 0
+    count = 0
+    for index, item in enumerate(nums):
+        if index % 2 == 1:
+            resolved = _resolve(item)
+            if isinstance(resolved, list):
+                count += len(resolved)
+            elif resolved is not None:
+                count += 1
+    return count
+
+
+def _count_marked_content_sequences(reader: Any) -> int:
+    count = 0
+    for page in reader.pages:
+        try:
+            content = page.get_contents()
+            if content is None:
+                continue
+            data = content.get_data().decode("latin-1", errors="ignore")
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+        count += data.count("/MCID")
+    return count

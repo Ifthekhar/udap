@@ -128,6 +128,9 @@ class PdfInspection:
     heading_candidate_count: int = 0
     table_candidate_count: int = 0
     pages_with_multiple_columns: list[int] = field(default_factory=list)
+    marked_content_count: int = 0
+    parent_tree_entry_count: int = 0
+    structure_element_count: int = 0
     extraction_warnings: list[str] = field(default_factory=list)
 
     @property

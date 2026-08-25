@@ -1,8 +1,7 @@
-"""Minimal PDF logical structure tagging.
+"""Minimal PDF logical structure tagging with MCID associations.
 
 This module creates a first structure tree for generated PDFs. It is a stepping
-stone toward PDF/UA, not a full compliance implementation: content streams are
-not yet marked with MCIDs and the parent tree is intentionally minimal.
+stone toward PDF/UA, not a full compliance implementation.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
         from pypdf.generic import (
             ArrayObject,
             BooleanObject,
+            DecodedStreamObject,
             DictionaryObject,
             NameObject,
             NumberObject,
@@ -52,26 +52,48 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
 
     children = ArrayObject()
     page_ref = _first_page_reference(writer)
-    for mapping in structure_plan.get("mappings", []):
+    parent_entries = ArrayObject()
+    page = writer.pages[0] if writer.pages else None
+    mappings = list(structure_plan.get("mappings", []))
+    for mcid, mapping in enumerate(mappings):
         role = str(mapping.get("pdf_role") or "P")
+        mcr = DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/MCR"),
+                NameObject("/MCID"): NumberObject(mcid),
+            }
+        )
+        if page_ref is not None:
+            mcr[NameObject("/Pg")] = page_ref
+
         element = DictionaryObject(
             {
                 NameObject("/Type"): NameObject("/StructElem"),
                 NameObject("/S"): NameObject(f"/{role}"),
                 NameObject("/P"): struct_tree_ref,
                 NameObject("/T"): TextStringObject(str(mapping.get("text_preview") or role)),
+                NameObject("/K"): mcr,
             }
         )
         if page_ref is not None:
             element[NameObject("/Pg")] = page_ref
-        children.append(writer._add_object(element))
+        element_ref = writer._add_object(element)
+        children.append(element_ref)
+        parent_entries.append(element_ref)
 
     struct_tree[NameObject("/K")] = children
+    parent_tree[NameObject("/Nums")] = ArrayObject([NumberObject(0), parent_entries])
     root[NameObject("/StructTreeRoot")] = struct_tree_ref
 
-    if writer.pages:
-        for index, page in enumerate(writer.pages):
-            page[NameObject("/StructParents")] = NumberObject(index)
+    if page is not None:
+        page[NameObject("/StructParents")] = NumberObject(0)
+        _replace_page_contents_with_marked_content(
+            writer=writer,
+            page=page,
+            mcid_count=len(mappings),
+            stream_cls=DecodedStreamObject,
+            name_cls=NameObject,
+        )
 
     with NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         temp_path = Path(tmp.name)
@@ -89,3 +111,34 @@ def _first_page_reference(writer) -> object | None:
         return None
     page = writer.pages[0]
     return getattr(page, "indirect_reference", None)
+
+
+def _replace_page_contents_with_marked_content(
+    *,
+    writer,
+    page,
+    mcid_count: int,
+    stream_cls,
+    name_cls,
+) -> None:
+    content = page.get_contents()
+    if content is None:
+        return
+
+    original = content.get_data()
+    wrapped = _wrap_content_with_mcids(original, mcid_count)
+    stream = stream_cls()
+    stream.set_data(wrapped)
+    page[name_cls("/Contents")] = writer._add_object(stream)
+
+
+def _wrap_content_with_mcids(original: bytes, mcid_count: int) -> bytes:
+    if mcid_count <= 0:
+        return original
+
+    # This first implementation associates the full page content with every
+    # planned structure element. Later hardening will split content streams per
+    # element so each MCID maps to only its own drawing operations.
+    prefix = "".join(f"/P <</MCID {mcid}>> BDC\n" for mcid in range(mcid_count))
+    suffix = "".join("EMC\n" for _ in range(mcid_count))
+    return prefix.encode("ascii") + original + b"\n" + suffix.encode("ascii")
