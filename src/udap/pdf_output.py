@@ -316,6 +316,7 @@ def _output_filename(original_filename: str) -> str:
 
 
 def _content_elements(elements: list[DocumentElement]) -> list[DocumentElement]:
+    links = [element for element in elements if element.type == ElementType.LINK]
     return [
         element
         for element in elements
@@ -329,7 +330,33 @@ def _content_elements(elements: list[DocumentElement]) -> list[DocumentElement]:
             ElementType.LINK,
         }
         and _has_renderable_content(element)
+        and not _is_duplicate_link_text(element, links)
     ]
+
+
+def _is_duplicate_link_text(element: DocumentElement, links: list[DocumentElement]) -> bool:
+    if element.type == ElementType.LINK or not element.text.strip():
+        return False
+    text = element.text.strip().casefold()
+    for link in links:
+        if not link.text.strip() or link.text.strip().casefold() != text:
+            continue
+        if _boxes_overlap(element.source.bbox, link.source.bbox):
+            return True
+    return False
+
+
+def _boxes_overlap(
+    first: tuple[float, float, float, float] | None,
+    second: tuple[float, float, float, float] | None,
+) -> bool:
+    if first is None or second is None:
+        return False
+    left = max(first[0], second[0])
+    top = max(first[1], second[1])
+    right = min(first[2], second[2])
+    bottom = min(first[3], second[3])
+    return right > left and bottom > top
 
 
 def _has_renderable_content(element: DocumentElement) -> bool:

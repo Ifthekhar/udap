@@ -74,6 +74,7 @@ APP_HTML = """<!doctype html>
       <div class="panel-header">
         <h2 id="report-title">Report</h2>
       </div>
+      <p class="notice">Automated checks show structural alignment; they are not a legal compliance guarantee.</p>
       <div id="report-status" class="summary-grid"></div>
       <div id="report-details" class="report-grid"></div>
     </section>
@@ -424,6 +425,12 @@ textarea {
 .empty {
   color: var(--muted);
   font-style: italic;
+}
+
+.notice {
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 @media (max-width: 860px) {

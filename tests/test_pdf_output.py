@@ -322,6 +322,40 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(generated.pdf.parent_tree_entry_count, 2)
         self.assertEqual(generated.pdf.structure_element_count, 1)
 
+    def test_output_skips_text_block_that_duplicates_link_annotation(self):
+        link_bbox = (72.0, 136.0, 136.0, 158.0)
+        result = analyse_document(
+            DocumentModel(
+                original_filename="duplicate-link.pdf",
+                source_format="pdf",
+                title="Duplicate Link",
+                language="en-AU",
+                elements=[
+                    DocumentElement(
+                        type=ElementType.PARAGRAPH,
+                        text="Read more",
+                        source=SourceLocation(page_number=1, element_id="1:2", bbox=link_bbox),
+                    ),
+                    DocumentElement(
+                        type=ElementType.LINK,
+                        text="Read more",
+                        href="https://example.com/report",
+                        source=SourceLocation(
+                            page_number=1,
+                            element_id="1:link:1",
+                            bbox=link_bbox,
+                        ),
+                    ),
+                ],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(result, output_dir=tmp)
+            text = PdfReader(artifact.path).pages[0].extract_text()
+
+        self.assertEqual(text.count("Read more"), 1)
+
     def test_image_structure_writes_figure_alt_text(self):
         result = analyse_document(
             DocumentModel(

@@ -24,10 +24,12 @@ class ApiJobsTest(unittest.TestCase):
         self.assertIn("remediation-summary", page_response.text)
         self.assertIn("Report", page_response.text)
         self.assertIn("report-details", page_response.text)
+        self.assertIn("not a legal compliance guarantee", page_response.text)
         self.assertEqual(css_response.headers["content-type"], "text/css; charset=utf-8")
         self.assertIn("workflow-grid", css_response.text)
         self.assertIn("inline-form", css_response.text)
         self.assertIn("report-grid", css_response.text)
+        self.assertIn("notice", css_response.text)
         self.assertEqual(
             js_response.headers["content-type"],
             "application/javascript",

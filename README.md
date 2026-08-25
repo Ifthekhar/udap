@@ -100,3 +100,8 @@ hierarchy, and simple table roles.
 
 - `PLAN.md`
 - `AGENT.md`
+
+## Customer Demo
+
+Demo samples, the demo talk track, and an automated end-to-end rehearsal live in
+`demo/`.
