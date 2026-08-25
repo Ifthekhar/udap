@@ -9,11 +9,13 @@ from uuid import uuid4
 
 from .extractors import load_pdf
 from .models import (
+    AccessibilityIssue,
     AnalysisResult,
     DocumentElement,
     ElementType,
     OutputArtifact,
     OutputArtifactType,
+    RemediationSuggestion,
     SuggestionAction,
 )
 from .pdf_tagging import PdfTaggingError, apply_minimal_structure_tree
@@ -57,12 +59,19 @@ def generate_remediated_pdf(
     page = doc.new_page(width=595, height=842)
     cursor_y = 72.0
 
-    rendered_mappings: list[dict[str, int | str | None]] = []
+    rendered_mappings: list[dict[str, bool | int | str | None]] = []
     role_counts: dict[str, int] = {}
     for element in _content_elements(result.document.walk()):
         page, cursor_y = _ensure_space(doc, page, cursor_y)
         page_index = page.number
-        cursor_y, block_count = _write_element(page, element, cursor_y, pymupdf)
+        alt_text = _resolved_image_alt_text(result, element)
+        cursor_y, block_count = _write_element(
+            page,
+            element,
+            cursor_y,
+            pymupdf,
+            alt_text=alt_text,
+        )
         role = _pdf_role_for_element(element)
         role_counts[role] = role_counts.get(role, 0) + 1
         rendered_mappings.append(
@@ -73,6 +82,8 @@ def generate_remediated_pdf(
                 "text_preview": element.text[:80],
                 "page_index": page_index,
                 "content_block_count": block_count,
+                "alt_text": alt_text,
+                "decorative": element.decorative,
             }
         )
 
@@ -124,6 +135,53 @@ def _resolved_value(result: AnalysisResult, action: SuggestionAction) -> str | N
     return None
 
 
+def _resolved_image_alt_text(result: AnalysisResult, element: DocumentElement) -> str | None:
+    if element.type != ElementType.IMAGE:
+        return None
+    if element.decorative:
+        return ""
+
+    suggestion_by_id = {suggestion.id: suggestion for suggestion in result.suggestions}
+    issue_by_id = {issue.id: issue for issue in result.issues}
+    for event in reversed(result.audit_events):
+        if not event.suggestion_id:
+            continue
+        suggestion = suggestion_by_id.get(event.suggestion_id)
+        if not _is_alt_text_suggestion_for_element(suggestion, issue_by_id, element):
+            continue
+        if event.metadata.get("decision") not in {"accept", "edit"}:
+            continue
+        final_value = event.metadata.get("final_value")
+        if isinstance(final_value, str) and final_value.strip():
+            return final_value.strip()
+        if suggestion and suggestion.proposed_value and suggestion.proposed_value.strip():
+            return suggestion.proposed_value.strip()
+
+    if element.alt_text and element.alt_text.strip():
+        return element.alt_text.strip()
+    return None
+
+
+def _is_alt_text_suggestion_for_element(
+    suggestion: RemediationSuggestion | None,
+    issue_by_id: dict[str, AccessibilityIssue],
+    element: DocumentElement,
+) -> bool:
+    if suggestion is None or suggestion.action != SuggestionAction.GENERATE_ALT_TEXT:
+        return False
+    issue = issue_by_id.get(suggestion.issue_id)
+    if issue is None:
+        return False
+    source = getattr(issue, "source", None)
+    if source is None:
+        return False
+    if source.element_id and source.element_id == element.source.element_id:
+        return True
+    if source.page_number and source.page_number == element.source.page_number:
+        return source.bbox is None or source.bbox == element.source.bbox
+    return source == element.source
+
+
 def _fallback_title(result: AnalysisResult) -> str:
     for element in result.document.walk():
         text = element.text.strip()
@@ -148,16 +206,23 @@ def _content_elements(elements: list[DocumentElement]) -> list[DocumentElement]:
             ElementType.PARAGRAPH,
             ElementType.LIST_ITEM,
             ElementType.TABLE,
+            ElementType.IMAGE,
             ElementType.LINK,
         }
-        and element.text.strip()
+        and _has_renderable_content(element)
     ]
+
+
+def _has_renderable_content(element: DocumentElement) -> bool:
+    if element.type == ElementType.IMAGE:
+        return True
+    return bool(element.text.strip())
 
 
 def _build_structure_plan(
     *,
     role_counts: dict[str, int],
-    mappings: list[dict[str, int | str | None]],
+    mappings: list[dict[str, bool | int | str | None]],
     status: str = "planned",
 ) -> dict:
     return {
@@ -189,6 +254,8 @@ def _pdf_role_for_element(element: DocumentElement) -> str:
         return "LI"
     if element.type == ElementType.TABLE:
         return "Table"
+    if element.type == ElementType.IMAGE:
+        return "Figure"
     return "P"
 
 
@@ -199,7 +266,14 @@ def _ensure_space(doc, page, cursor_y: float):
     return page, 72.0
 
 
-def _write_element(page, element: DocumentElement, cursor_y: float, pymupdf) -> tuple[float, int]:
+def _write_element(
+    page,
+    element: DocumentElement,
+    cursor_y: float,
+    pymupdf,
+    *,
+    alt_text: str | None = None,
+) -> tuple[float, int]:
     left = 72.0
     right = 523.0
     width_chars = 72
@@ -209,6 +283,9 @@ def _write_element(page, element: DocumentElement, cursor_y: float, pymupdf) -> 
     if element.type == ElementType.HEADING:
         font_size = 18 if element.heading_level == 1 else 14
         line_height = 24 if element.heading_level == 1 else 20
+
+    if element.type == ElementType.IMAGE:
+        return _write_image_placeholder(page, element, cursor_y, pymupdf, alt_text=alt_text)
 
     text = element.text.replace("\n", " ").strip()
     lines = wrap(text, width=width_chars) or [text]
@@ -222,6 +299,36 @@ def _write_element(page, element: DocumentElement, cursor_y: float, pymupdf) -> 
         page.insert_link({"kind": pymupdf.LINK_URI, "from": rect, "uri": element.href})
 
     return cursor_y + 8, len(lines)
+
+
+def _write_image_placeholder(
+    page,
+    element: DocumentElement,
+    cursor_y: float,
+    pymupdf,
+    *,
+    alt_text: str | None,
+) -> tuple[float, int]:
+    left = 72.0
+    width = 451.0
+    height = 64.0
+    rect = pymupdf.Rect(left, cursor_y, left + width, cursor_y + height)
+    page.draw_rect(rect, color=(0.35, 0.35, 0.35), width=0.75)
+
+    if element.decorative:
+        label = "Decorative image"
+    elif alt_text:
+        label = f"Figure: {alt_text}"
+    else:
+        label = "Figure: alt text requires review"
+
+    lines = wrap(label.replace("\n", " ").strip(), width=68) or [label]
+    text_y = cursor_y + 20
+    for line in lines[:3]:
+        page.insert_text((left + 10, text_y), line, fontsize=10)
+        text_y += 14
+
+    return cursor_y + height + 12, min(len(lines), 3)
 
 
 def _escape_pdf_string(value: str) -> str:

@@ -70,7 +70,10 @@ simple link annotations, `/MarkInfo`, a minimal `/StructTreeRoot`, marked-conten
 IDs, and parent-tree entries. Generated text drawing blocks are now wrapped per
 logical document element, including multi-line elements that span multiple PDF
 drawing blocks. Link structure elements also reference generated link annotations
-with `/OBJR` entries and annotation `/StructParent` mappings. Full PDF/UA
+with `/OBJR` entries and annotation `/StructParent` mappings. Image elements are
+rebuilt as generated figure placeholders with `/Figure` structure elements and
+`/Alt` text from the source model or accepted review decisions; decorative images
+are marked in the structure plan and receive empty `/Alt` text. Full PDF/UA
 compliance is not claimed yet.
 
 ## Product Docs

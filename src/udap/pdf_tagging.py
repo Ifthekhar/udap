@@ -100,6 +100,9 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
         )
         if page_ref is not None:
             element[NameObject("/Pg")] = page_ref
+        alt_text = _mapping_alt_text(mapping)
+        if role == "Figure" and alt_text is not None:
+            element[NameObject("/Alt")] = TextStringObject(alt_text)
         element_ref = writer._add_object(element)
         children.append(element_ref)
         parent_tree_entries.setdefault(page_index, ArrayObject()).append(element_ref)
@@ -246,3 +249,13 @@ def _mapping_content_block_count(mapping: Any) -> int:
     except (AttributeError, TypeError, ValueError):
         return 1
     return max(1, block_count)
+
+
+def _mapping_alt_text(mapping: Any) -> str | None:
+    try:
+        value = mapping.get("alt_text")
+    except AttributeError:
+        return None
+    if value is None:
+        return None
+    return str(value).strip()

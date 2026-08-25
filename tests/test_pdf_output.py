@@ -12,6 +12,7 @@ from udap.models import (
     ElementType,
     JobStatus,
     ReviewDecision,
+    SourceLocation,
     UserDecision,
 )
 from udap.pdf_output import generate_remediated_pdf
@@ -178,6 +179,107 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(generated.pdf.marked_content_count, 1)
         self.assertEqual(generated.pdf.parent_tree_entry_count, 2)
         self.assertEqual(generated.pdf.structure_element_count, 1)
+
+    def test_image_structure_writes_figure_alt_text(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="figure.pdf",
+                source_format="pdf",
+                title="Figure",
+                language="en-AU",
+                elements=[
+                    DocumentElement(
+                        type=ElementType.IMAGE,
+                        alt_text="Bar chart comparing quarterly revenue.",
+                    ),
+                ],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(result, output_dir=tmp)
+            generated = load_pdf(Path(artifact.path))
+            reader = PdfReader(artifact.path)
+            struct_tree = reader.trailer["/Root"]["/StructTreeRoot"].get_object()
+            figure = struct_tree["/K"][0].get_object()
+
+        self.assertEqual(figure["/S"], "/Figure")
+        self.assertEqual(figure["/Alt"], "Bar chart comparing quarterly revenue.")
+        self.assertEqual(figure["/K"]["/Type"], "/MCR")
+        self.assertEqual(generated.pdf.marked_content_count, 1)
+        self.assertEqual(generated.pdf.parent_tree_entry_count, 1)
+        self.assertEqual(generated.pdf.structure_element_count, 1)
+        self.assertEqual(artifact.validation_report["structure_plan"]["role_counts"]["Figure"], 1)
+        self.assertFalse(artifact.validation_report["structure_plan"]["mappings"][0]["decorative"])
+
+    def test_image_structure_uses_reviewed_alt_text(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="reviewed-figure.pdf",
+                source_format="pdf",
+                title="Reviewed Figure",
+                language="en-AU",
+                elements=[
+                    DocumentElement(
+                        type=ElementType.IMAGE,
+                        source=SourceLocation(element_id="chart-1"),
+                        metadata={"nearby_text": "Quarterly revenue rose across all regions."},
+                    ),
+                ],
+            )
+        )
+        suggestion = next(
+            suggestion
+            for suggestion in result.suggestions
+            if suggestion.action.value == "generate_alt_text"
+        )
+        reviewed = record_user_decisions(
+            result,
+            [
+                UserDecision(
+                    suggestion_id=suggestion.id,
+                    issue_id=suggestion.issue_id,
+                    decision=ReviewDecision.EDIT,
+                    final_value="Line chart showing quarterly revenue growth across all regions.",
+                )
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(reviewed, output_dir=tmp)
+            reader = PdfReader(artifact.path)
+            struct_tree = reader.trailer["/Root"]["/StructTreeRoot"].get_object()
+            figure = struct_tree["/K"][0].get_object()
+
+        self.assertEqual(
+            figure["/Alt"],
+            "Line chart showing quarterly revenue growth across all regions.",
+        )
+        self.assertEqual(
+            artifact.validation_report["structure_plan"]["mappings"][0]["alt_text"],
+            "Line chart showing quarterly revenue growth across all regions.",
+        )
+
+    def test_decorative_image_is_marked_in_structure_plan(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="decorative.pdf",
+                source_format="pdf",
+                title="Decorative",
+                language="en-AU",
+                elements=[DocumentElement(type=ElementType.IMAGE, decorative=True)],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(result, output_dir=tmp)
+            reader = PdfReader(artifact.path)
+            struct_tree = reader.trailer["/Root"]["/StructTreeRoot"].get_object()
+            figure = struct_tree["/K"][0].get_object()
+
+        self.assertEqual(figure["/S"], "/Figure")
+        self.assertEqual(figure["/Alt"], "")
+        self.assertTrue(artifact.validation_report["structure_plan"]["mappings"][0]["decorative"])
 
     def test_job_store_persists_output_artifact(self):
         with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as output_dir:
