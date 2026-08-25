@@ -70,6 +70,14 @@ APP_HTML = """<!doctype html>
       </section>
     </section>
 
+    <section class="report-panel" aria-labelledby="report-title">
+      <div class="panel-header">
+        <h2 id="report-title">Report</h2>
+      </div>
+      <div id="report-status" class="summary-grid"></div>
+      <div id="report-details" class="report-grid"></div>
+    </section>
+
     <section class="event-panel" aria-labelledby="events-title">
       <div class="panel-header">
         <h2 id="events-title">Status</h2>
@@ -217,7 +225,8 @@ h3 {
 }
 
 .panel,
-.event-panel {
+.event-panel,
+.report-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -381,6 +390,33 @@ textarea {
   margin-top: 14px;
 }
 
+.report-panel {
+  margin-top: 14px;
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.report-section {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.report-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.report-section li {
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+
 #message {
   color: var(--muted);
 }
@@ -398,7 +434,8 @@ textarea {
   }
 
   .workflow-grid,
-  .summary-grid {
+  .summary-grid,
+  .report-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -422,6 +459,8 @@ const issues = document.querySelector("#issues");
 const suggestions = document.querySelector("#suggestions");
 const outputs = document.querySelector("#outputs");
 const remediationSummary = document.querySelector("#remediation-summary");
+const reportStatus = document.querySelector("#report-status");
+const reportDetails = document.querySelector("#report-details");
 
 uploadForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -530,6 +569,7 @@ function render() {
   renderSuggestions();
   renderRemediationSummary();
   renderOutputs();
+  renderReport();
 }
 
 function renderStatus() {
@@ -654,6 +694,29 @@ function renderOutputs() {
   `).join("");
 }
 
+function renderReport() {
+  const report = findValidationReport();
+  const remediation = findRemediationSummary();
+  if (!report || !remediation) {
+    reportStatus.innerHTML = `<p class="empty">Generate outputs to view the report.</p>`;
+    reportDetails.innerHTML = "";
+    return;
+  }
+
+  reportStatus.innerHTML = [
+    metric(statusText(report.pdf_ua?.status), "PDF/UA"),
+    metric(statusText(report.structure_plan?.status), "Structure"),
+    metric(report.summary?.initial_issue_count ?? 0, "Generated issues"),
+  ].join("");
+
+  reportDetails.innerHTML = [
+    reportSection("Fixed issues", remediation.fixed_issues),
+    reportSection("Remaining issues", remediation.remaining_issues),
+    reportSection("Manual review", remediation.manual_review_items),
+    reportSection("Rejected issues", remediation.rejected_issues),
+  ].join("");
+}
+
 function visibleSuggestions() {
   if (!state.job) return [];
   return state.job.suggestions.filter((suggestion) => {
@@ -668,13 +731,18 @@ function issueById(issueId) {
 }
 
 function findRemediationSummary() {
+  const report = findValidationReport();
+  return report?.remediation_summary || null;
+}
+
+function findValidationReport() {
   if (!state.job) return null;
   for (const artifact of state.job.output_artifacts || []) {
-    if (artifact.validation_report?.remediation_summary) {
-      return artifact.validation_report.remediation_summary;
+    if (artifact.type === "accessible_pdf" && artifact.validation_report) {
+      return artifact.validation_report;
     }
-    if (artifact.validation_report?.validation_report?.remediation_summary) {
-      return artifact.validation_report.validation_report.remediation_summary;
+    if (artifact.type === "accessibility_report" && artifact.validation_report?.validation_report) {
+      return artifact.validation_report.validation_report;
     }
   }
   return null;
@@ -684,6 +752,17 @@ function artifactLabel(artifact) {
   if (artifact.type === "accessible_pdf") return "Accessible PDF";
   if (artifact.type === "accessibility_report") return "Remediation Report";
   return artifact.type.replaceAll("_", " ");
+}
+
+function reportSection(title, items) {
+  const list = items && items.length
+    ? `<ul>${items.map((item) => `<li><strong>${escapeHtml(item.issue_type.replaceAll("_", " "))}</strong>: ${escapeHtml(item.explanation)}</li>`).join("")}</ul>`
+    : `<p class="empty">None.</p>`;
+  return `<section class="report-section"><h3>${escapeHtml(title)}</h3>${list}</section>`;
+}
+
+function statusText(value) {
+  return value ? value.replaceAll("_", " ") : "not run";
 }
 
 function setMessage(text, isError = false) {
