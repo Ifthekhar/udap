@@ -57,13 +57,32 @@ def generate_remediated_pdf(
     page = doc.new_page(width=595, height=842)
     cursor_y = 72.0
 
+    rendered_mappings: list[dict[str, int | str | None]] = []
+    role_counts: dict[str, int] = {}
     for element in _content_elements(result.document.walk()):
         page, cursor_y = _ensure_space(doc, page, cursor_y)
-        cursor_y = _write_element(page, element, cursor_y, pymupdf)
+        page_index = page.number
+        cursor_y, block_count = _write_element(page, element, cursor_y, pymupdf)
+        role = _pdf_role_for_element(element)
+        role_counts[role] = role_counts.get(role, 0) + 1
+        rendered_mappings.append(
+            {
+                "element_id": element.id,
+                "element_type": element.type.value,
+                "pdf_role": role,
+                "text_preview": element.text[:80],
+                "page_index": page_index,
+                "content_block_count": block_count,
+            }
+        )
 
     doc.set_metadata({"title": title})
     doc.xref_set_key(doc.pdf_catalog(), "Lang", f"({_escape_pdf_string(language)})")
-    structure_plan = _build_structure_plan(result, status="embedded_minimal")
+    structure_plan = _build_structure_plan(
+        role_counts=role_counts,
+        mappings=rendered_mappings,
+        status="embedded_minimal",
+    )
     doc.save(path)
     doc.close()
 
@@ -135,22 +154,12 @@ def _content_elements(elements: list[DocumentElement]) -> list[DocumentElement]:
     ]
 
 
-def _build_structure_plan(result: AnalysisResult, status: str = "planned") -> dict:
-    role_counts: dict[str, int] = {}
-    mappings: list[dict[str, str | None]] = []
-
-    for element in _content_elements(result.document.walk()):
-        role = _pdf_role_for_element(element)
-        role_counts[role] = role_counts.get(role, 0) + 1
-        mappings.append(
-            {
-                "element_id": element.id,
-                "element_type": element.type.value,
-                "pdf_role": role,
-                "text_preview": element.text[:80],
-            }
-        )
-
+def _build_structure_plan(
+    *,
+    role_counts: dict[str, int],
+    mappings: list[dict[str, int | str | None]],
+    status: str = "planned",
+) -> dict:
     return {
         "status": status,
         "details": (
@@ -190,7 +199,7 @@ def _ensure_space(doc, page, cursor_y: float):
     return page, 72.0
 
 
-def _write_element(page, element: DocumentElement, cursor_y: float, pymupdf) -> float:
+def _write_element(page, element: DocumentElement, cursor_y: float, pymupdf) -> tuple[float, int]:
     left = 72.0
     right = 523.0
     width_chars = 72
@@ -212,7 +221,7 @@ def _write_element(page, element: DocumentElement, cursor_y: float, pymupdf) -> 
         rect = pymupdf.Rect(left, cursor_y - line_height, right, cursor_y)
         page.insert_link({"kind": pymupdf.LINK_URI, "from": rect, "uri": element.href})
 
-    return cursor_y + 8
+    return cursor_y + 8, len(lines)
 
 
 def _escape_pdf_string(value: str) -> str:

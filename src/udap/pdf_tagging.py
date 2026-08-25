@@ -6,6 +6,7 @@ stone toward PDF/UA, not a full compliance implementation.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -51,12 +52,17 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
     struct_tree_ref = writer._add_object(struct_tree)
 
     children = ArrayObject()
-    page_ref = _first_page_reference(writer)
-    parent_entries = ArrayObject()
-    page = writer.pages[0] if writer.pages else None
+    parent_entries_by_page: dict[int, Any] = {}
+    mcid_by_page: dict[int, int] = {}
     mappings = list(structure_plan.get("mappings", []))
-    for mcid, mapping in enumerate(mappings):
+    wrapping_plan_by_page: dict[int, list[dict[str, int]]] = {}
+    for mapping in mappings:
         role = str(mapping.get("pdf_role") or "P")
+        page_index = _mapping_page_index(mapping, page_count=len(writer.pages))
+        page_ref = _page_reference(writer, page_index)
+        mcid = mcid_by_page.get(page_index, 0)
+        mcid_by_page[page_index] = mcid + 1
+
         mcr = DictionaryObject(
             {
                 NameObject("/Type"): NameObject("/MCR"),
@@ -79,18 +85,25 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
             element[NameObject("/Pg")] = page_ref
         element_ref = writer._add_object(element)
         children.append(element_ref)
-        parent_entries.append(element_ref)
+        parent_entries_by_page.setdefault(page_index, ArrayObject()).append(element_ref)
+        wrapping_plan_by_page.setdefault(page_index, []).append(
+            {
+                "mcid": mcid,
+                "content_block_count": _mapping_content_block_count(mapping),
+            }
+        )
 
     struct_tree[NameObject("/K")] = children
-    parent_tree[NameObject("/Nums")] = ArrayObject([NumberObject(0), parent_entries])
+    parent_tree[NameObject("/Nums")] = _build_parent_tree_nums(parent_entries_by_page)
     root[NameObject("/StructTreeRoot")] = struct_tree_ref
 
-    if page is not None:
-        page[NameObject("/StructParents")] = NumberObject(0)
+    for page_index, wrapping_plan in wrapping_plan_by_page.items():
+        page = writer.pages[page_index]
+        page[NameObject("/StructParents")] = NumberObject(page_index)
         _replace_page_contents_with_marked_content(
             writer=writer,
             page=page,
-            mcid_count=len(mappings),
+            wrapping_plan=wrapping_plan,
             stream_cls=DecodedStreamObject,
             name_cls=NameObject,
         )
@@ -106,10 +119,10 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
             temp_path.unlink()
 
 
-def _first_page_reference(writer) -> object | None:
-    if not writer.pages:
+def _page_reference(writer, page_index: int) -> object | None:
+    if not writer.pages or page_index >= len(writer.pages):
         return None
-    page = writer.pages[0]
+    page = writer.pages[page_index]
     return getattr(page, "indirect_reference", None)
 
 
@@ -117,7 +130,7 @@ def _replace_page_contents_with_marked_content(
     *,
     writer,
     page,
-    mcid_count: int,
+    wrapping_plan: list[dict[str, int]],
     stream_cls,
     name_cls,
 ) -> None:
@@ -126,19 +139,71 @@ def _replace_page_contents_with_marked_content(
         return
 
     original = content.get_data()
-    wrapped = _wrap_content_with_mcids(original, mcid_count)
+    wrapped = _wrap_content_blocks_with_mcids(original, wrapping_plan)
     stream = stream_cls()
     stream.set_data(wrapped)
     page[name_cls("/Contents")] = writer._add_object(stream)
 
 
-def _wrap_content_with_mcids(original: bytes, mcid_count: int) -> bytes:
-    if mcid_count <= 0:
+def _wrap_content_blocks_with_mcids(original: bytes, wrapping_plan: list[dict[str, int]]) -> bytes:
+    if not wrapping_plan:
         return original
 
-    # This first implementation associates the full page content with every
-    # planned structure element. Later hardening will split content streams per
-    # element so each MCID maps to only its own drawing operations.
-    prefix = "".join(f"/P <</MCID {mcid}>> BDC\n" for mcid in range(mcid_count))
-    suffix = "".join("EMC\n" for _ in range(mcid_count))
+    blocks = list(re.finditer(rb"q\s+BT\s+.*?ET\s+Q", original, re.DOTALL))
+    required_blocks = sum(item["content_block_count"] for item in wrapping_plan)
+    if len(blocks) < required_blocks:
+        return _wrap_entire_content_with_mcids(original, [item["mcid"] for item in wrapping_plan])
+
+    output = bytearray()
+    source_cursor = 0
+    block_cursor = 0
+    for item in wrapping_plan:
+        block_count = item["content_block_count"]
+        if block_count <= 0:
+            continue
+
+        first_block = blocks[block_cursor]
+        last_block = blocks[block_cursor + block_count - 1]
+        output.extend(original[source_cursor : first_block.start()])
+        output.extend(f"/P <</MCID {item['mcid']}>> BDC\n".encode("ascii"))
+        output.extend(original[first_block.start() : last_block.end()])
+        output.extend(b"\nEMC")
+        source_cursor = last_block.end()
+        block_cursor += block_count
+
+    output.extend(original[source_cursor:])
+    return bytes(output)
+
+
+def _wrap_entire_content_with_mcids(original: bytes, mcids: list[int]) -> bytes:
+    prefix = "".join(f"/P <</MCID {mcid}>> BDC\n" for mcid in mcids)
+    suffix = "".join("EMC\n" for _ in mcids)
     return prefix.encode("ascii") + original + b"\n" + suffix.encode("ascii")
+
+
+def _build_parent_tree_nums(parent_entries_by_page: dict[int, Any]):
+    from pypdf.generic import ArrayObject, NumberObject
+
+    nums = ArrayObject()
+    for page_index in sorted(parent_entries_by_page):
+        nums.append(NumberObject(page_index))
+        nums.append(parent_entries_by_page[page_index])
+    return nums
+
+
+def _mapping_page_index(mapping: Any, page_count: int) -> int:
+    try:
+        page_index = int(mapping.get("page_index", 0))
+    except (AttributeError, TypeError, ValueError):
+        return 0
+    if page_count <= 0:
+        return 0
+    return max(0, min(page_index, page_count - 1))
+
+
+def _mapping_content_block_count(mapping: Any) -> int:
+    try:
+        block_count = int(mapping.get("content_block_count", 1))
+    except (AttributeError, TypeError, ValueError):
+        return 1
+    return max(1, block_count)

@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from pypdf import PdfReader
+
 from udap.extractors import load_pdf
 from udap.job_store import LocalJobStore
 from udap.models import (
@@ -42,6 +44,7 @@ class PdfOutputTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             artifact = generate_remediated_pdf(result, output_dir=tmp)
             generated = load_pdf(Path(artifact.path))
+            content = PdfReader(artifact.path).pages[0].get_contents().get_data().decode("latin-1")
 
         self.assertEqual(artifact.filename, "source_accessible.pdf")
         self.assertEqual(generated.title, "Accessible Annual Report")
@@ -50,6 +53,7 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(generated.pdf.marked_content_count, 2)
         self.assertEqual(generated.pdf.parent_tree_entry_count, 2)
         self.assertEqual(generated.pdf.structure_element_count, 2)
+        self.assertIn("EMC\n\n/P <</MCID 1>> BDC", content)
         self.assertTrue(any("Annual Report 2026" in element.text for element in generated.elements))
         self.assertIn("validation_report", artifact.__dict__)
         self.assertEqual(artifact.validation_report["pdf_ua"]["status"], "unavailable")
@@ -101,6 +105,37 @@ class PdfOutputTest(unittest.TestCase):
 
         self.assertEqual(generated.title, "Reviewed Title")
         self.assertEqual(generated.language, "en-US")
+
+    def test_multiline_element_uses_one_marked_content_section(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="wrapped.pdf",
+                source_format="pdf",
+                title="Wrapped",
+                language="en-AU",
+                elements=[
+                    DocumentElement(
+                        type=ElementType.PARAGRAPH,
+                        text=(
+                            "This paragraph is intentionally long enough to wrap across multiple "
+                            "generated PDF text drawing blocks while still representing one logical "
+                            "document element in the structure tree."
+                        ),
+                    ),
+                ],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(result, output_dir=tmp)
+            generated = load_pdf(Path(artifact.path))
+            content = PdfReader(artifact.path).pages[0].get_contents().get_data().decode("latin-1")
+
+        self.assertEqual(generated.pdf.marked_content_count, 1)
+        self.assertEqual(generated.pdf.parent_tree_entry_count, 1)
+        self.assertEqual(generated.pdf.structure_element_count, 1)
+        self.assertGreater(content.count("\nq\nBT\n"), 1)
+        self.assertEqual(content.count("/MCID"), 1)
 
     def test_job_store_persists_output_artifact(self):
         with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as output_dir:
