@@ -56,6 +56,11 @@ class PdfStructureRegressionTest(unittest.TestCase):
                     {check["id"] for check in report_structure["checks"]},
                     case.expected_checks,
                 )
+                self.assertEqual(report_structure["reading_order"]["status"], "passed")
+                self.assertTrue(report_structure["reading_order"]["top_level_order_matches_plan"])
+                self.assertTrue(report_structure["reading_order"]["content_sequence_matches_plan"])
+                self.assertTrue(report_structure["reading_order"]["mcids_increase_by_page"])
+                self.assertTrue(report_structure["reading_order"]["parent_tree_keys_match_pages"])
 
                 reader = PdfReader(artifact.path)
                 if case.expected_page_count is not None:
@@ -97,6 +102,23 @@ class PdfStructureRegressionTest(unittest.TestCase):
 
         self.assertEqual(content_page_keys, [0, 1])
         self.assertEqual(parent_tree_keys, [0, 1])
+
+    def test_multi_page_fixture_reports_reading_order_by_page(self):
+        case = next(
+            item for item in generated_pdf_regression_cases() if item.name == "multi_page_parent_tree"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(analyse_document(case.document), output_dir=tmp)
+
+        reading_order = artifact.validation_report["pdf_structure"]["reading_order"]
+
+        self.assertEqual(reading_order["status"], "passed")
+        self.assertEqual(reading_order["page_marked_content_counts"], {"0": 29, "1": 11})
+        self.assertEqual(reading_order["actual_content_sequence"][0], {"role": "P", "page_index": 0})
+        self.assertEqual(reading_order["actual_content_sequence"][28], {"role": "P", "page_index": 0})
+        self.assertEqual(reading_order["actual_content_sequence"][29], {"role": "P", "page_index": 1})
+        self.assertEqual(reading_order["actual_content_sequence"][-1], {"role": "P", "page_index": 1})
 
 
 def _first_structure_element(reader: PdfReader):

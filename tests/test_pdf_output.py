@@ -69,6 +69,10 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(artifact.validation_report["pdf_structure"]["status"], "passed")
         self.assertEqual(artifact.validation_report["pdf_structure"]["summary"]["failed_count"], 0)
         self.assertEqual(
+            artifact.validation_report["pdf_structure"]["reading_order"]["status"],
+            "passed",
+        )
+        self.assertEqual(
             artifact.validation_report["pdf_structure"]["role_counts"],
             {"H1": 1, "P": 1},
         )

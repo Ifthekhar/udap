@@ -69,8 +69,8 @@ def validate_generated_pdf_structure(
 
     These checks are intentionally narrower than PDF/UA. They verify the core
     relationships this MVP writes itself: marked content, parent-tree mappings,
-    link annotation structure references, figure alt attributes, and simple
-    table and list roles.
+    link annotation structure references, figure alt attributes, simple table
+    and list roles, and generated reading order.
     """
 
     try:
@@ -107,6 +107,13 @@ def validate_generated_pdf_structure(
                 )
             ],
         }
+    actual["reading_order"] = _build_reading_order_report(
+        content_entries=actual["content_entries"],
+        top_level_order_roles=actual["top_level_order_roles"],
+        page_marked_content_counts=actual["page_marked_content_counts"],
+        parent_tree_keys_match_pages=actual["parent_tree_keys_match_pages"],
+        structure_plan=structure_plan,
+    )
 
     checks = [
         _check(
@@ -171,6 +178,12 @@ def validate_generated_pdf_structure(
             if actual["lists_missing_required_roles"] == 0
             else f"{actual['lists_missing_required_roles']} /L element(s) are missing required list roles.",
         ),
+        _check(
+            "structure.reading_order_matches_plan",
+            "Reading order matches the generated plan",
+            actual["reading_order"]["passed"],
+            actual["reading_order"]["details"],
+        ),
     ]
     if structure_plan:
         checks.append(_planned_mapping_check(actual, structure_plan))
@@ -203,6 +216,7 @@ def validate_generated_pdf_structure(
             "list_count": actual["list_count"],
         },
         "role_counts": actual["role_counts"],
+        "reading_order": actual["reading_order"],
         "checks": checks,
     }
 
@@ -242,6 +256,7 @@ def _inspect_structure(reader: Any) -> dict[str, Any]:
     parent_tree = _resolve(struct_tree.get("/ParentTree")) if isinstance(struct_tree, dict) else None
     parent_tree_entries = _parent_tree_entries(parent_tree)
     page_marked_content_counts = _page_marked_content_counts(reader)
+    page_ref_keys = _page_ref_keys(reader)
     elements = _structure_elements(struct_tree.get("/K") if isinstance(struct_tree, dict) else None)
     top_level_elements = [
         _resolve(item) for item in _as_list(struct_tree.get("/K") if isinstance(struct_tree, dict) else None)
@@ -251,6 +266,10 @@ def _inspect_structure(reader: Any) -> dict[str, Any]:
     ]
     role_counts = _role_counts(elements)
     top_level_role_counts = _role_counts(top_level_elements)
+    content_entries = _content_entries(
+        struct_tree.get("/K") if isinstance(struct_tree, dict) else None,
+        page_ref_keys,
+    )
 
     return {
         "has_struct_tree": isinstance(struct_tree, dict),
@@ -265,7 +284,14 @@ def _inspect_structure(reader: Any) -> dict[str, Any]:
         "list_count": role_counts.get("L", 0),
         "role_counts": role_counts,
         "top_level_role_counts": top_level_role_counts,
+        "top_level_order_roles": [_role_name(element.get("/S")) for element in top_level_elements],
+        "content_entries": content_entries,
         "mcids_have_parent_tree_entries": _mcids_have_parent_tree_entries(
+            reader,
+            page_marked_content_counts,
+            parent_tree_entries,
+        ),
+        "parent_tree_keys_match_pages": _parent_tree_keys_match_pages(
             reader,
             page_marked_content_counts,
             parent_tree_entries,
@@ -279,6 +305,7 @@ def _inspect_structure(reader: Any) -> dict[str, Any]:
         "tables_missing_required_roles": _tables_missing_required_roles(elements),
         "lists_missing_required_roles": _lists_missing_required_roles(elements),
         "page_marked_content_counts": page_marked_content_counts,
+        "reading_order": {},
     }
 
 
@@ -361,6 +388,115 @@ def _expected_top_level_mapping_count(mappings: list[Any]) -> int:
     return count
 
 
+def _expected_top_level_order(mappings: list[Any]) -> list[str]:
+    order: list[str] = []
+    index = 0
+    while index < len(mappings):
+        mapping = mappings[index]
+        role = str(mapping.get("pdf_role") or "P") if hasattr(mapping, "get") else "P"
+        if role != "LI":
+            order.append(role)
+            index += 1
+            continue
+
+        order.append("L")
+        page_index = mapping.get("page_index", 0) if hasattr(mapping, "get") else 0
+        index += 1
+        while index < len(mappings):
+            candidate = mappings[index]
+            candidate_role = (
+                str(candidate.get("pdf_role") or "P") if hasattr(candidate, "get") else "P"
+            )
+            candidate_page = candidate.get("page_index", 0) if hasattr(candidate, "get") else 0
+            if candidate_role != "LI" or candidate_page != page_index:
+                break
+            index += 1
+    return order
+
+
+def _expected_content_entries(mappings: list[Any]) -> list[dict[str, int | str]]:
+    entries: list[dict[str, int | str]] = []
+    for mapping in mappings:
+        if not hasattr(mapping, "get"):
+            continue
+        role = str(mapping.get("pdf_role") or "P")
+        page_index = int(mapping.get("page_index", 0) or 0)
+        if role == "Table":
+            rows = _mapping_table_rows(mapping)
+            header_count = _mapping_table_header_count(mapping)
+            for row_index, row in enumerate(rows):
+                cell_role = "TH" if row_index == 0 and header_count else "TD"
+                entries.extend({"role": cell_role, "page_index": page_index} for _cell in row)
+            continue
+        if role == "LI":
+            entries.append({"role": "LBody", "page_index": page_index})
+            continue
+        entries.append({"role": role, "page_index": page_index})
+    return entries
+
+
+def _build_reading_order_report(
+    *,
+    content_entries: list[dict[str, int | None | str]],
+    top_level_order_roles: list[str],
+    page_marked_content_counts: dict[int, int],
+    parent_tree_keys_match_pages: bool,
+    structure_plan: dict[str, Any] | None,
+) -> dict[str, Any]:
+    mappings = structure_plan.get("mappings", []) if structure_plan else []
+    if not isinstance(mappings, list):
+        mappings = []
+
+    expected_top_level = _expected_top_level_order(mappings)
+    expected_content = _expected_content_entries(mappings)
+    actual_content = [
+        {"role": item["role"], "page_index": item["page_index"]} for item in content_entries
+    ]
+    expected_content_compact = [
+        {"role": item["role"], "page_index": item["page_index"]} for item in expected_content
+    ]
+
+    top_level_matches = not expected_top_level or top_level_order_roles == expected_top_level
+    content_matches = not expected_content_compact or actual_content == expected_content_compact
+    mcids_increase = _mcids_increase_by_page(content_entries)
+    passed = (
+        top_level_matches
+        and content_matches
+        and mcids_increase
+        and parent_tree_keys_match_pages
+    )
+
+    details = "Reading order follows the generated structure plan."
+    if not passed:
+        failed_parts = []
+        if not top_level_matches:
+            failed_parts.append("top-level structure order differs from the plan")
+        if not content_matches:
+            failed_parts.append("content role or page sequence differs from the plan")
+        if not mcids_increase:
+            failed_parts.append("MCIDs do not increase in structure order on each page")
+        if not parent_tree_keys_match_pages:
+            failed_parts.append("parent-tree page keys do not match page /StructParents")
+        details = f"Reading order checks failed: {', '.join(failed_parts)}."
+
+    return {
+        "status": "passed" if passed else "failed",
+        "passed": passed,
+        "details": details,
+        "top_level_order_matches_plan": top_level_matches,
+        "content_sequence_matches_plan": content_matches,
+        "mcids_increase_by_page": mcids_increase,
+        "parent_tree_keys_match_pages": parent_tree_keys_match_pages,
+        "expected_top_level_roles": expected_top_level,
+        "actual_top_level_roles": top_level_order_roles,
+        "expected_content_sequence": expected_content_compact,
+        "actual_content_sequence": actual_content,
+        "page_marked_content_counts": {
+            str(page_index): count for page_index, count in sorted(page_marked_content_counts.items())
+        },
+    }
+
+
 def _resolve(value: Any) -> Any:
     if hasattr(value, "get_object"):
         return value.get_object()
@@ -435,6 +571,21 @@ def _parent_tree_entry_count(entries: dict[int, Any]) -> int:
     return count
 
 
+def _page_ref_keys(reader: Any) -> dict[tuple[int | None, int | None], int]:
+    keys: dict[tuple[int | None, int | None], int] = {}
+    for index, page in enumerate(reader.pages):
+        key = _ref_key(getattr(page, "indirect_reference", None))
+        if key != (None, None):
+            keys[key] = index
+    return keys
+
+
+def _ref_key(value: Any) -> tuple[int | None, int | None]:
+    if value is None:
+        return (None, None)
+    return (getattr(value, "idnum", None), getattr(value, "generation", None))
+
+
 def _page_marked_content_counts(reader: Any) -> dict[int, int]:
     counts: dict[int, int] = {}
     for page_index, page in enumerate(reader.pages):
@@ -447,6 +598,37 @@ def _page_marked_content_counts(reader: Any) -> dict[int, int]:
             continue
         counts[page_index] = data.count("/MCID")
     return counts
+
+
+def _content_entries(
+    value: Any,
+    page_ref_keys: dict[tuple[int | None, int | None], int],
+    role: str | None = None,
+) -> list[dict[str, int | None | str]]:
+    resolved = _resolve(value)
+    if resolved is None:
+        return []
+    if isinstance(resolved, list):
+        entries: list[dict[str, int | None | str]] = []
+        for item in resolved:
+            entries.extend(_content_entries(item, page_ref_keys, role))
+        return entries
+    if not isinstance(resolved, dict):
+        return []
+
+    if resolved.get("/Type") == "/StructElem":
+        child_role = _role_name(resolved.get("/S"))
+        return _content_entries(resolved.get("/K"), page_ref_keys, child_role)
+    if resolved.get("/Type") == "/MCR" and "/MCID" in resolved:
+        page_ref = resolved.raw_get("/Pg") if hasattr(resolved, "raw_get") else resolved.get("/Pg")
+        return [
+            {
+                "role": role or "unknown",
+                "page_index": page_ref_keys.get(_ref_key(page_ref)),
+                "mcid": int(resolved["/MCID"]),
+            }
+        ]
+    return []
 
 
 def _mcids_have_parent_tree_entries(
@@ -467,6 +649,38 @@ def _mcids_have_parent_tree_entries(
         entry = parent_tree_entries.get(parent_key)
         if not isinstance(entry, list) or len(entry) < mcid_count:
             return False
+    return True
+
+
+def _parent_tree_keys_match_pages(
+    reader: Any,
+    page_marked_content_counts: dict[int, int],
+    parent_tree_entries: dict[int, Any],
+) -> bool:
+    expected_keys = set()
+    for page_index, mcid_count in page_marked_content_counts.items():
+        if mcid_count <= 0:
+            continue
+        page = reader.pages[page_index]
+        if "/StructParents" not in page:
+            return False
+        try:
+            expected_keys.add(int(page["/StructParents"]))
+        except (TypeError, ValueError):
+            return False
+    return expected_keys.issubset(set(parent_tree_entries))
+
+
+def _mcids_increase_by_page(content_entries: list[dict[str, int | None | str]]) -> bool:
+    last_mcid_by_page: dict[int, int] = {}
+    for entry in content_entries:
+        page_index = entry.get("page_index")
+        mcid = entry.get("mcid")
+        if not isinstance(page_index, int) or not isinstance(mcid, int):
+            return False
+        if page_index in last_mcid_by_page and mcid <= last_mcid_by_page[page_index]:
+            return False
+        last_mcid_by_page[page_index] = mcid
     return True
 
 
@@ -571,3 +785,32 @@ def _lists_missing_required_roles(elements: list[Any]) -> int:
         if invalid_item:
             missing += 1
     return missing
+
+
+def _mapping_table_rows(mapping: Any) -> list[list[str]]:
+    try:
+        value = mapping.get("table_rows")
+    except AttributeError:
+        return []
+    if not isinstance(value, list):
+        return []
+
+    rows: list[list[str]] = []
+    for row in value:
+        if not isinstance(row, list):
+            continue
+        cells = [str(cell).strip() for cell in row if str(cell).strip()]
+        if cells:
+            rows.append(cells)
+    return rows
+
+
+def _mapping_table_header_count(mapping: Any) -> int:
+    try:
+        value = mapping.get("table_header_count", 0)
+    except AttributeError:
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0

@@ -33,6 +33,7 @@ class PdfRegressionCase:
             "structure.link_annotations_mapped",
             "structure.tables_have_roles",
             "structure.lists_have_roles",
+            "structure.reading_order_matches_plan",
             "structure.matches_plan",
         }
     )
