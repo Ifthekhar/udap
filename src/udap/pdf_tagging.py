@@ -62,6 +62,79 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
         role = str(mapping.get("pdf_role") or "P")
         page_index = _mapping_page_index(mapping, page_count=len(writer.pages))
         page_ref = _page_reference(writer, page_index)
+        table_rows = _mapping_table_rows(mapping)
+        if role == "Table" and table_rows:
+            table_element = DictionaryObject(
+                {
+                    NameObject("/Type"): NameObject("/StructElem"),
+                    NameObject("/S"): NameObject("/Table"),
+                    NameObject("/P"): struct_tree_ref,
+                    NameObject("/T"): TextStringObject(str(mapping.get("text_preview") or "Table")),
+                    NameObject("/K"): ArrayObject(),
+                }
+            )
+            if page_ref is not None:
+                table_element[NameObject("/Pg")] = page_ref
+            table_ref = writer._add_object(table_element)
+            row_refs = ArrayObject()
+            header_count = _mapping_table_header_count(mapping)
+
+            for row_index, row in enumerate(table_rows):
+                row_element = DictionaryObject(
+                    {
+                        NameObject("/Type"): NameObject("/StructElem"),
+                        NameObject("/S"): NameObject("/TR"),
+                        NameObject("/P"): table_ref,
+                        NameObject("/K"): ArrayObject(),
+                    }
+                )
+                if page_ref is not None:
+                    row_element[NameObject("/Pg")] = page_ref
+                row_ref = writer._add_object(row_element)
+                cell_refs = ArrayObject()
+
+                for cell_text in row:
+                    cell_role = "TH" if row_index == 0 and header_count else "TD"
+                    mcid = mcid_by_page.get(page_index, 0)
+                    mcid_by_page[page_index] = mcid + 1
+                    mcr = DictionaryObject(
+                        {
+                            NameObject("/Type"): NameObject("/MCR"),
+                            NameObject("/MCID"): NumberObject(mcid),
+                        }
+                    )
+                    if page_ref is not None:
+                        mcr[NameObject("/Pg")] = page_ref
+                    cell_element = DictionaryObject(
+                        {
+                            NameObject("/Type"): NameObject("/StructElem"),
+                            NameObject("/S"): NameObject(f"/{cell_role}"),
+                            NameObject("/P"): row_ref,
+                            NameObject("/T"): TextStringObject(str(cell_text)),
+                            NameObject("/K"): mcr,
+                        }
+                    )
+                    if page_ref is not None:
+                        cell_element[NameObject("/Pg")] = page_ref
+                    if cell_role == "TH":
+                        cell_element[NameObject("/Scope")] = NameObject("/Column")
+                    cell_ref = writer._add_object(cell_element)
+                    cell_refs.append(cell_ref)
+                    parent_tree_entries.setdefault(page_index, ArrayObject()).append(cell_ref)
+                    wrapping_plan_by_page.setdefault(page_index, []).append(
+                        {
+                            "mcid": mcid,
+                            "content_block_count": 1,
+                        }
+                    )
+
+                row_element[NameObject("/K")] = cell_refs
+                row_refs.append(row_ref)
+
+            table_element[NameObject("/K")] = row_refs
+            children.append(table_ref)
+            continue
+
         mcid = mcid_by_page.get(page_index, 0)
         mcid_by_page[page_index] = mcid + 1
         link_annotation_ref = (
@@ -259,3 +332,32 @@ def _mapping_alt_text(mapping: Any) -> str | None:
     if value is None:
         return None
     return str(value).strip()
+
+
+def _mapping_table_rows(mapping: Any) -> list[list[str]]:
+    try:
+        value = mapping.get("table_rows")
+    except AttributeError:
+        return []
+    if not isinstance(value, list):
+        return []
+
+    rows: list[list[str]] = []
+    for row in value:
+        if not isinstance(row, list):
+            continue
+        cells = [str(cell).strip() for cell in row if str(cell).strip()]
+        if cells:
+            rows.append(cells)
+    return rows
+
+
+def _mapping_table_header_count(mapping: Any) -> int:
+    try:
+        value = mapping.get("table_header_count", 0)
+    except AttributeError:
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0

@@ -73,7 +73,8 @@ drawing blocks. Link structure elements also reference generated link annotation
 with `/OBJR` entries and annotation `/StructParent` mappings. Image elements are
 rebuilt as generated figure placeholders with `/Figure` structure elements and
 `/Alt` text from the source model or accepted review decisions; decorative images
-are marked in the structure plan and receive empty `/Alt` text. Full PDF/UA
+are marked in the structure plan and receive empty `/Alt` text. Simple text tables
+are rebuilt with `/Table`, `/TR`, `/TH`, and `/TD` structure elements. Full PDF/UA
 compliance is not claimed yet.
 
 ## Product Docs

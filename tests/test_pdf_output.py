@@ -281,6 +281,47 @@ class PdfOutputTest(unittest.TestCase):
         self.assertEqual(figure["/Alt"], "")
         self.assertTrue(artifact.validation_report["structure_plan"]["mappings"][0]["decorative"])
 
+    def test_simple_table_structure_uses_rows_and_header_cells(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="table.pdf",
+                source_format="pdf",
+                title="Table",
+                language="en-AU",
+                elements=[
+                    DocumentElement(
+                        type=ElementType.TABLE,
+                        text="Revenue\t100\nCosts\t50",
+                        table_headers=["Metric", "Amount"],
+                    ),
+                ],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(result, output_dir=tmp)
+            generated = load_pdf(Path(artifact.path))
+            reader = PdfReader(artifact.path)
+            struct_tree = reader.trailer["/Root"]["/StructTreeRoot"].get_object()
+            table = struct_tree["/K"][0].get_object()
+            rows = [row_ref.get_object() for row_ref in table["/K"]]
+            header_cells = [cell_ref.get_object() for cell_ref in rows[0]["/K"]]
+            data_cells = [cell_ref.get_object() for cell_ref in rows[1]["/K"]]
+
+        self.assertEqual(table["/S"], "/Table")
+        self.assertEqual([row["/S"] for row in rows], ["/TR", "/TR", "/TR"])
+        self.assertEqual([cell["/S"] for cell in header_cells], ["/TH", "/TH"])
+        self.assertEqual([cell["/Scope"] for cell in header_cells], ["/Column", "/Column"])
+        self.assertEqual([cell["/S"] for cell in data_cells], ["/TD", "/TD"])
+        self.assertEqual(generated.pdf.marked_content_count, 6)
+        self.assertEqual(generated.pdf.parent_tree_entry_count, 6)
+        self.assertEqual(generated.pdf.structure_element_count, 10)
+        self.assertEqual(artifact.validation_report["structure_plan"]["role_counts"]["Table"], 1)
+        self.assertEqual(
+            artifact.validation_report["structure_plan"]["mappings"][0]["table_rows"],
+            [["Metric", "Amount"], ["Revenue", "100"], ["Costs", "50"]],
+        )
+
     def test_job_store_persists_output_artifact(self):
         with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as output_dir:
             store = LocalJobStore(job_dir)

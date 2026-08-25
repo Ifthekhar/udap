@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import wrap
@@ -65,12 +66,14 @@ def generate_remediated_pdf(
         page, cursor_y = _ensure_space(doc, page, cursor_y)
         page_index = page.number
         alt_text = _resolved_image_alt_text(result, element)
+        table_rows = _table_rows_for_element(element)
         cursor_y, block_count = _write_element(
             page,
             element,
             cursor_y,
             pymupdf,
             alt_text=alt_text,
+            table_rows=table_rows,
         )
         role = _pdf_role_for_element(element)
         role_counts[role] = role_counts.get(role, 0) + 1
@@ -84,6 +87,8 @@ def generate_remediated_pdf(
                 "content_block_count": block_count,
                 "alt_text": alt_text,
                 "decorative": element.decorative,
+                "table_rows": table_rows,
+                "table_header_count": len(element.table_headers),
             }
         )
 
@@ -216,6 +221,8 @@ def _content_elements(elements: list[DocumentElement]) -> list[DocumentElement]:
 def _has_renderable_content(element: DocumentElement) -> bool:
     if element.type == ElementType.IMAGE:
         return True
+    if element.type == ElementType.TABLE:
+        return bool(_table_rows_for_element(element))
     return bool(element.text.strip())
 
 
@@ -230,7 +237,7 @@ def _build_structure_plan(
         "details": (
             "Generated PDF text is rebuilt from the internal document model. "
             "A minimal logical structure tree is embedded for headings, paragraphs, "
-            "links, lists, and table placeholders. Full PDF/UA tagging is not yet claimed."
+            "links, lists, figures, and simple tables. Full PDF/UA tagging is not yet claimed."
         ),
         "role_counts": role_counts,
         "mappings": mappings,
@@ -273,6 +280,7 @@ def _write_element(
     pymupdf,
     *,
     alt_text: str | None = None,
+    table_rows: list[list[str]] | None = None,
 ) -> tuple[float, int]:
     left = 72.0
     right = 523.0
@@ -286,6 +294,8 @@ def _write_element(
 
     if element.type == ElementType.IMAGE:
         return _write_image_placeholder(page, element, cursor_y, pymupdf, alt_text=alt_text)
+    if element.type == ElementType.TABLE:
+        return _write_table(page, cursor_y, pymupdf, rows=table_rows or [])
 
     text = element.text.replace("\n", " ").strip()
     lines = wrap(text, width=width_chars) or [text]
@@ -329,6 +339,79 @@ def _write_image_placeholder(
         text_y += 14
 
     return cursor_y + height + 12, min(len(lines), 3)
+
+
+def _write_table(page, cursor_y: float, pymupdf, *, rows: list[list[str]]) -> tuple[float, int]:
+    if not rows:
+        return cursor_y, 0
+
+    left = 72.0
+    width = 451.0
+    row_height = 24.0
+    column_count = max(len(row) for row in rows)
+    column_width = width / max(column_count, 1)
+    font_size = 9
+    content_blocks = 0
+
+    for row_index, row in enumerate(rows):
+        y = cursor_y + row_index * row_height
+        for column_index in range(column_count):
+            x = left + column_index * column_width
+            rect = pymupdf.Rect(x, y, x + column_width, y + row_height)
+            page.draw_rect(rect, color=(0.35, 0.35, 0.35), width=0.5)
+            cell_text = row[column_index] if column_index < len(row) else ""
+            if cell_text:
+                page.insert_text((x + 4, y + 15), _fit_cell_text(cell_text), fontsize=font_size)
+                content_blocks += 1
+
+    return cursor_y + len(rows) * row_height + 12, content_blocks
+
+
+def _table_rows_for_element(element: DocumentElement) -> list[list[str]]:
+    if element.type != ElementType.TABLE:
+        return []
+
+    parsed_rows = _parse_table_rows(element.text)
+    headers = [header.strip() for header in element.table_headers if header.strip()]
+    if not headers:
+        return parsed_rows
+
+    if parsed_rows and _normalise_row(parsed_rows[0]) == _normalise_row(headers):
+        return parsed_rows
+    return [headers, *parsed_rows]
+
+
+def _parse_table_rows(text: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if "\t" in stripped:
+            cells = stripped.split("\t")
+        elif "|" in stripped:
+            cells = stripped.strip("|").split("|")
+        elif "," in stripped:
+            cells = stripped.split(",")
+        else:
+            cells = _split_on_repeated_spaces(stripped)
+        row = [cell.strip() for cell in cells if cell.strip()]
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _split_on_repeated_spaces(value: str) -> list[str]:
+    return re.split(r"\s{2,}", value)
+
+
+def _normalise_row(row: list[str]) -> list[str]:
+    return [cell.strip().casefold() for cell in row]
+
+
+def _fit_cell_text(value: str) -> str:
+    text = value.replace("\n", " ").strip()
+    return text if len(text) <= 28 else f"{text[:25]}..."
 
 
 def _escape_pdf_string(value: str) -> str:
