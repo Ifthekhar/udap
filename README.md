@@ -69,7 +69,9 @@ Generated PDFs currently include title metadata, language metadata, readable tex
 simple link annotations, `/MarkInfo`, a minimal `/StructTreeRoot`, marked-content
 IDs, and parent-tree entries. Generated text drawing blocks are now wrapped per
 logical document element, including multi-line elements that span multiple PDF
-drawing blocks. Full PDF/UA compliance is not claimed yet.
+drawing blocks. Link structure elements also reference generated link annotations
+with `/OBJR` entries and annotation `/StructParent` mappings. Full PDF/UA
+compliance is not claimed yet.
 
 ## Product Docs
 

@@ -52,16 +52,21 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
     struct_tree_ref = writer._add_object(struct_tree)
 
     children = ArrayObject()
-    parent_entries_by_page: dict[int, Any] = {}
+    parent_tree_entries: dict[int, Any] = {}
     mcid_by_page: dict[int, int] = {}
     mappings = list(structure_plan.get("mappings", []))
     wrapping_plan_by_page: dict[int, list[dict[str, int]]] = {}
+    link_annotations_by_page = _link_annotation_refs_by_page(writer)
+    annotation_parent_key = len(writer.pages)
     for mapping in mappings:
         role = str(mapping.get("pdf_role") or "P")
         page_index = _mapping_page_index(mapping, page_count=len(writer.pages))
         page_ref = _page_reference(writer, page_index)
         mcid = mcid_by_page.get(page_index, 0)
         mcid_by_page[page_index] = mcid + 1
+        link_annotation_ref = (
+            _pop_first(link_annotations_by_page.get(page_index, [])) if role == "Link" else None
+        )
 
         mcr = DictionaryObject(
             {
@@ -72,20 +77,37 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
         if page_ref is not None:
             mcr[NameObject("/Pg")] = page_ref
 
+        element_k: Any = mcr
+        if link_annotation_ref is not None:
+            objr = DictionaryObject(
+                {
+                    NameObject("/Type"): NameObject("/OBJR"),
+                    NameObject("/Obj"): link_annotation_ref,
+                }
+            )
+            if page_ref is not None:
+                objr[NameObject("/Pg")] = page_ref
+            element_k = ArrayObject([mcr, objr])
+
         element = DictionaryObject(
             {
                 NameObject("/Type"): NameObject("/StructElem"),
                 NameObject("/S"): NameObject(f"/{role}"),
                 NameObject("/P"): struct_tree_ref,
                 NameObject("/T"): TextStringObject(str(mapping.get("text_preview") or role)),
-                NameObject("/K"): mcr,
+                NameObject("/K"): element_k,
             }
         )
         if page_ref is not None:
             element[NameObject("/Pg")] = page_ref
         element_ref = writer._add_object(element)
         children.append(element_ref)
-        parent_entries_by_page.setdefault(page_index, ArrayObject()).append(element_ref)
+        parent_tree_entries.setdefault(page_index, ArrayObject()).append(element_ref)
+        if link_annotation_ref is not None:
+            annotation = link_annotation_ref.get_object()
+            annotation[NameObject("/StructParent")] = NumberObject(annotation_parent_key)
+            parent_tree_entries[annotation_parent_key] = element_ref
+            annotation_parent_key += 1
         wrapping_plan_by_page.setdefault(page_index, []).append(
             {
                 "mcid": mcid,
@@ -94,7 +116,7 @@ def apply_minimal_structure_tree(path: str | Path, structure_plan: dict[str, Any
         )
 
     struct_tree[NameObject("/K")] = children
-    parent_tree[NameObject("/Nums")] = _build_parent_tree_nums(parent_entries_by_page)
+    parent_tree[NameObject("/Nums")] = _build_parent_tree_nums(parent_tree_entries)
     root[NameObject("/StructTreeRoot")] = struct_tree_ref
 
     for page_index, wrapping_plan in wrapping_plan_by_page.items():
@@ -124,6 +146,23 @@ def _page_reference(writer, page_index: int) -> object | None:
         return None
     page = writer.pages[page_index]
     return getattr(page, "indirect_reference", None)
+
+
+def _link_annotation_refs_by_page(writer) -> dict[int, list[Any]]:
+    annotations_by_page: dict[int, list[Any]] = {}
+    for page_index, page in enumerate(writer.pages):
+        annotations = page.get("/Annots", [])
+        for annotation_ref in annotations:
+            annotation = annotation_ref.get_object()
+            if annotation.get("/Subtype") == "/Link":
+                annotations_by_page.setdefault(page_index, []).append(annotation_ref)
+    return annotations_by_page
+
+
+def _pop_first(items: list[Any]) -> Any | None:
+    if not items:
+        return None
+    return items.pop(0)
 
 
 def _replace_page_contents_with_marked_content(

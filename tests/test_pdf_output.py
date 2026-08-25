@@ -137,6 +137,48 @@ class PdfOutputTest(unittest.TestCase):
         self.assertGreater(content.count("\nq\nBT\n"), 1)
         self.assertEqual(content.count("/MCID"), 1)
 
+    def test_link_structure_references_annotation_object(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="link.pdf",
+                source_format="pdf",
+                title="Link",
+                language="en-AU",
+                elements=[
+                    DocumentElement(
+                        type=ElementType.LINK,
+                        text="Example link",
+                        href="https://example.com",
+                    ),
+                ],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = generate_remediated_pdf(result, output_dir=tmp)
+            generated = load_pdf(Path(artifact.path))
+            reader = PdfReader(artifact.path)
+            page = reader.pages[0]
+            annotation_ref = page["/Annots"][0]
+            annotation = annotation_ref.get_object()
+            struct_tree = reader.trailer["/Root"]["/StructTreeRoot"].get_object()
+            link_element_ref = struct_tree["/K"][0]
+            link_element = link_element_ref.get_object()
+            parent_tree_nums = struct_tree["/ParentTree"].get_object()["/Nums"]
+
+        self.assertEqual(annotation["/Subtype"], "/Link")
+        self.assertIn("/StructParent", annotation)
+        self.assertEqual(link_element["/S"], "/Link")
+        self.assertEqual(link_element["/K"][0]["/Type"], "/MCR")
+        self.assertEqual(link_element["/K"][1]["/Type"], "/OBJR")
+        self.assertEqual(link_element["/K"][1].raw_get("/Obj"), annotation_ref)
+        self.assertIn(annotation["/StructParent"], parent_tree_nums)
+        parent_key_index = parent_tree_nums.index(annotation["/StructParent"])
+        self.assertEqual(parent_tree_nums[parent_key_index + 1], link_element_ref)
+        self.assertEqual(generated.pdf.marked_content_count, 1)
+        self.assertEqual(generated.pdf.parent_tree_entry_count, 2)
+        self.assertEqual(generated.pdf.structure_element_count, 1)
+
     def test_job_store_persists_output_artifact(self):
         with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as output_dir:
             store = LocalJobStore(job_dir)
