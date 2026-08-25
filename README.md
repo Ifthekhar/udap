@@ -21,6 +21,7 @@ This repository currently contains the PDF-first backend foundation:
 - Remediation suggestion generation
 - Accept/edit/reject review workflow
 - First-pass remediated PDF generation
+- Downloadable JSON accessibility/remediation report artifacts
 - Optional PDF/UA validation through `veraPDF`
 - Minimal logical structure tree embedding for generated PDF content
 - MCID and parent-tree association checks for generated PDF tags
@@ -55,6 +56,9 @@ POST /jobs/{job_id}/review
 POST /jobs/{job_id}/outputs/pdf
 GET  /jobs/{job_id}/outputs/{artifact_id}
 ```
+
+`POST /jobs/{job_id}/outputs/pdf` creates two downloadable artifacts: the rebuilt
+PDF and a JSON accessibility/remediation report.
 
 By default, local analysis jobs are stored under `.local/jobs`. Override with:
 

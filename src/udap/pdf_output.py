@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,15 @@ from .pipeline import analyse_document, build_validation_report
 
 class PdfGenerationError(RuntimeError):
     pass
+
+
+def generate_remediated_pdf_outputs(
+    result: AnalysisResult,
+    output_dir: str | Path = ".local/outputs",
+) -> list[OutputArtifact]:
+    pdf_artifact = generate_remediated_pdf(result, output_dir=output_dir)
+    report_artifact = generate_accessibility_report_artifact(pdf_artifact)
+    return [pdf_artifact, report_artifact]
 
 
 def generate_remediated_pdf(
@@ -124,6 +134,41 @@ def generate_remediated_pdf(
         created_at=datetime.now(UTC).isoformat(),
         validation_report=validation,
     )
+
+
+def generate_accessibility_report_artifact(pdf_artifact: OutputArtifact) -> OutputArtifact:
+    report_path = _report_path_for_pdf(pdf_artifact.path)
+    report_payload = {
+        "artifact_type": OutputArtifactType.ACCESSIBILITY_REPORT.value,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_artifact": {
+            "id": pdf_artifact.id,
+            "type": pdf_artifact.type.value,
+            "filename": pdf_artifact.filename,
+            "path": pdf_artifact.path,
+            "created_at": pdf_artifact.created_at,
+        },
+        "validation_report": pdf_artifact.validation_report,
+    }
+    report_path.write_text(
+        json.dumps(report_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    return OutputArtifact(
+        id=str(uuid4()),
+        type=OutputArtifactType.ACCESSIBILITY_REPORT,
+        filename=report_path.name,
+        path=str(report_path),
+        created_at=report_payload["generated_at"],
+        validation_report=report_payload,
+    )
+
+
+def _report_path_for_pdf(path: str | Path) -> Path:
+    source = Path(path)
+    stem = source.stem.removesuffix("_accessible")
+    return source.with_name(f"{stem}_accessibility_report.json")
 
 
 def _resolved_value(result: AnalysisResult, action: SuggestionAction) -> str | None:

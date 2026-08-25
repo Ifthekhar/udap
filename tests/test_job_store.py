@@ -8,6 +8,8 @@ from udap.models import (
     DocumentModel,
     ElementType,
     JobStatus,
+    OutputArtifact,
+    OutputArtifactType,
     ReviewDecision,
     UserDecision,
 )
@@ -62,6 +64,42 @@ class JobStoreTest(unittest.TestCase):
             self.assertEqual(updated.status, JobStatus.REVIEWED)
             self.assertEqual(reloaded.status, JobStatus.REVIEWED)
             self.assertTrue(all(issue.final_status.value == "accepted" for issue in reloaded.result.issues))
+
+    def test_job_store_persists_multiple_output_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = LocalJobStore(Path(tmp))
+            result = analyse_document(
+                DocumentModel(
+                    original_filename="sample.pdf",
+                    source_format="pdf",
+                    title="Sample",
+                    language="en-AU",
+                    elements=[DocumentElement(type=ElementType.PARAGRAPH, text="Body")],
+                )
+            )
+            job = store.create(result)
+            pdf = OutputArtifact(
+                id="pdf-1",
+                type=OutputArtifactType.ACCESSIBLE_PDF,
+                filename="sample_accessible.pdf",
+                path="/tmp/sample_accessible.pdf",
+                created_at="2026-08-25T00:00:00+00:00",
+                validation_report={},
+            )
+            report = OutputArtifact(
+                id="report-1",
+                type=OutputArtifactType.ACCESSIBILITY_REPORT,
+                filename="sample_accessibility_report.json",
+                path="/tmp/sample_accessibility_report.json",
+                created_at="2026-08-25T00:00:00+00:00",
+                validation_report={"artifact_type": "accessibility_report"},
+            )
+
+            updated = store.add_output_artifacts(job.id, [pdf, report])
+            reloaded = store.get(job.id)
+
+        self.assertEqual(updated.status, JobStatus.OUTPUT_GENERATED)
+        self.assertEqual([artifact.type for artifact in reloaded.output_artifacts], [pdf.type, report.type])
 
 
 if __name__ == "__main__":

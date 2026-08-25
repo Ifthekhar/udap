@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,7 +16,11 @@ from udap.models import (
     SourceLocation,
     UserDecision,
 )
-from udap.pdf_output import generate_remediated_pdf
+from udap.pdf_output import (
+    generate_accessibility_report_artifact,
+    generate_remediated_pdf,
+    generate_remediated_pdf_outputs,
+)
 from udap.pipeline import analyse_document
 from udap.review import record_user_decisions
 
@@ -66,6 +71,47 @@ class PdfOutputTest(unittest.TestCase):
             artifact.validation_report["summary"]["issue_type_counts"],
         )
         self.assertEqual(artifact.validation_report["remediation_summary"]["remaining_issue_count"], 0)
+
+    def test_generate_remediated_pdf_outputs_writes_report_artifact(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="report.pdf",
+                source_format="pdf",
+                title="Report",
+                language="en-AU",
+                elements=[DocumentElement(type=ElementType.PARAGRAPH, text="Body text")],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf_artifact, report_artifact = generate_remediated_pdf_outputs(result, output_dir=tmp)
+            payload = json.loads(Path(report_artifact.path).read_text(encoding="utf-8"))
+
+        self.assertEqual(pdf_artifact.filename, "report_accessible.pdf")
+        self.assertEqual(report_artifact.filename, "report_accessibility_report.json")
+        self.assertEqual(report_artifact.type.value, "accessibility_report")
+        self.assertEqual(payload["artifact_type"], "accessibility_report")
+        self.assertEqual(payload["source_artifact"]["id"], pdf_artifact.id)
+        self.assertIn("remediation_summary", payload["validation_report"])
+        self.assertEqual(report_artifact.validation_report, payload)
+
+    def test_report_artifact_uses_pdf_validation_payload(self):
+        result = analyse_document(
+            DocumentModel(
+                original_filename="standalone-report.pdf",
+                source_format="pdf",
+                title="Standalone Report",
+                language="en-AU",
+                elements=[DocumentElement(type=ElementType.PARAGRAPH, text="Body text")],
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf_artifact = generate_remediated_pdf(result, output_dir=tmp)
+            report_artifact = generate_accessibility_report_artifact(pdf_artifact)
+            payload = json.loads(Path(report_artifact.path).read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["validation_report"], pdf_artifact.validation_report)
 
     def test_generate_remediated_pdf_uses_reviewed_title_and_language(self):
         result = analyse_document(

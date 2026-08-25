@@ -62,12 +62,28 @@ class ApiJobsTest(unittest.TestCase):
             self.assertEqual(output_response.status_code, 200)
             output_payload = output_response.json()
             self.assertEqual(output_payload["job"]["status"], "output_generated")
-            artifact = output_payload["output_artifacts"][0]
+            self.assertEqual(len(output_payload["output_artifacts"]), 2)
+            artifact = next(
+                item
+                for item in output_payload["output_artifacts"]
+                if item["type"] == "accessible_pdf"
+            )
+            report_artifact = next(
+                item
+                for item in output_payload["output_artifacts"]
+                if item["type"] == "accessibility_report"
+            )
             self.assertEqual(artifact["filename"], "sample_accessible.pdf")
+            self.assertEqual(report_artifact["filename"], "sample_accessibility_report.json")
 
             download_response = client.get(f"/jobs/{job_id}/outputs/{artifact['id']}")
             self.assertEqual(download_response.status_code, 200)
             self.assertEqual(download_response.headers["content-type"], "application/pdf")
+
+            report_response = client.get(f"/jobs/{job_id}/outputs/{report_artifact['id']}")
+            self.assertEqual(report_response.status_code, 200)
+            self.assertEqual(report_response.headers["content-type"], "application/json")
+            self.assertIn("remediation_summary", report_response.json()["validation_report"])
 
 
 def _build_single_issue_pdf() -> Path:

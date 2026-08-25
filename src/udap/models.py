@@ -79,6 +79,7 @@ class JobStatus(StrEnum):
 
 class OutputArtifactType(StrEnum):
     ACCESSIBLE_PDF = "accessible_pdf"
+    ACCESSIBILITY_REPORT = "accessibility_report"
 
 
 @dataclass(frozen=True)

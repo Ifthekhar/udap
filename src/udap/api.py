@@ -12,8 +12,8 @@ from pydantic import BaseModel
 
 from .extractors import MissingExtractorDependencyError, UnsupportedDocumentError, load_document
 from .job_store import JobNotFoundError, LocalJobStore
-from .models import ReviewDecision, UserDecision
-from .pdf_output import PdfGenerationError, generate_remediated_pdf
+from .models import OutputArtifactType, ReviewDecision, UserDecision
+from .pdf_output import PdfGenerationError, generate_remediated_pdf_outputs
 from .pipeline import analyse_document, build_job_report
 from .review import ReviewWorkflowError
 
@@ -101,8 +101,8 @@ def create_app():
     async def generate_pdf_output(job_id: str) -> dict:
         try:
             job = store.get(job_id)
-            artifact = generate_remediated_pdf(job.result)
-            updated = store.add_output_artifact(job_id, artifact)
+            artifacts = generate_remediated_pdf_outputs(job.result)
+            updated = store.add_output_artifacts(job_id, artifacts)
         except JobNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Job not found.") from exc
         except PdfGenerationError as exc:
@@ -126,7 +126,7 @@ def create_app():
 
         return FileResponse(
             artifact.path,
-            media_type="application/pdf",
+            media_type=_artifact_media_type(artifact.type),
             filename=artifact.filename,
         )
 
@@ -146,3 +146,9 @@ def _safe_suffix(filename: str) -> str:
     if lowered.endswith(".docx"):
         return ".docx"
     return ""
+
+
+def _artifact_media_type(artifact_type: OutputArtifactType) -> str:
+    if artifact_type == OutputArtifactType.ACCESSIBILITY_REPORT:
+        return "application/json"
+    return "application/pdf"

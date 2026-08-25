@@ -65,12 +65,15 @@ class LocalJobStore:
         return updated
 
     def add_output_artifact(self, job_id: str, artifact: OutputArtifact) -> AnalysisJob:
+        return self.add_output_artifacts(job_id, [artifact])
+
+    def add_output_artifacts(self, job_id: str, artifacts: list[OutputArtifact]) -> AnalysisJob:
         job = self.get(job_id)
         updated = replace(
             job,
             status=JobStatus.OUTPUT_GENERATED,
             updated_at=_now(),
-            output_artifacts=[*job.output_artifacts, artifact],
+            output_artifacts=[*job.output_artifacts, *artifacts],
         )
         self.save(updated)
         return updated
