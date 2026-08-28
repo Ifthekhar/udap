@@ -100,6 +100,7 @@ hierarchy, and simple table roles.
 
 - `PLAN.md`
 - `AGENT.md`
+- `ARCHITECTURE.md`
 
 ## Customer Demo
 
